@@ -266,8 +266,13 @@ func (e *LotteryEngine) shouldAbortOnError(err error) bool {
 }
 
 // RollbackMultiDraw attempts to rollback a partially completed multi-draw operation
-// This is a placeholder for future implementation of rollback logic
 func (e *LotteryEngine) RollbackMultiDraw(ctx context.Context, drawState *DrawState) error {
+	// Check for nil draw state first
+	if drawState == nil {
+		e.logger.Error("RollbackMultiDraw failed: nil draw state")
+		return ErrDrawStateCorrupted
+	}
+
 	e.logger.Info("RollbackMultiDraw called for lockKey=%s, completed=%d/%d",
 		drawState.LockKey, drawState.CompletedCount, drawState.TotalCount)
 
@@ -277,20 +282,56 @@ func (e *LotteryEngine) RollbackMultiDraw(ctx context.Context, drawState *DrawSt
 		return ErrDrawStateCorrupted
 	}
 
-	// FIXME:
-	// For now, we just log the rollback attempt
-	// In a real implementation, this might involve:
-	// 1. Reversing any side effects of the completed draws
-	// 2. Cleaning up any temporary state
-	// 3. Notifying external systems of the rollback
+	// Create state persistence manager for cleanup operations
+	spm := NewStatePersistenceManager(e.redisClient, e.logger)
 
-	e.logger.Info("Rollback completed for lockKey=%s", drawState.LockKey)
+	// Find all state keys for this lock key to clean up
+	stateKeys, err := spm.findStateKeys(ctx, drawState.LockKey)
+	if err != nil {
+		// Log the error but don't fail the rollback - cleanup is best effort
+		e.logger.Error("RollbackMultiDraw failed to find state keys for cleanup: lockKey=%s, error=%v",
+			drawState.LockKey, err)
+	} else {
+		// Clean up all found state keys
+		cleanupCount := 0
+		for _, key := range stateKeys {
+			if cleanupErr := spm.deleteState(ctx, key); cleanupErr != nil {
+				// Log cleanup failures but continue with rollback
+				e.logger.Error("RollbackMultiDraw failed to cleanup state key: key=%s, error=%v",
+					key, cleanupErr)
+			} else {
+				cleanupCount++
+				e.logger.Debug("RollbackMultiDraw cleaned up state key: %s", key)
+			}
+		}
+
+		if cleanupCount > 0 {
+			e.logger.Info("RollbackMultiDraw cleaned up %d state keys for lockKey=%s",
+				cleanupCount, drawState.LockKey)
+		} else if len(stateKeys) > 0 {
+			e.logger.Error("RollbackMultiDraw failed to cleanup any of %d state keys for lockKey=%s",
+				len(stateKeys), drawState.LockKey)
+		} else {
+			e.logger.Debug("RollbackMultiDraw found no state keys to cleanup for lockKey=%s",
+				drawState.LockKey)
+		}
+	}
+
+	// Log rollback completion for audit trail
+	e.logger.Info("Rollback completed for lockKey=%s, progress was %.1f%% (%d/%d completed)",
+		drawState.LockKey, drawState.Progress(), drawState.CompletedCount, drawState.TotalCount)
+
 	return nil
 }
 
-// SaveDrawState saves the current state of a multi-draw operation
-// This is a placeholder for future implementation of state persistence
+// SaveDrawState saves the current state of a multi-draw operation to Redis
 func (e *LotteryEngine) SaveDrawState(ctx context.Context, drawState *DrawState) error {
+	// Check for nil draw state first
+	if drawState == nil {
+		e.logger.Error("SaveDrawState failed: nil draw state")
+		return ErrDrawStateCorrupted
+	}
+
 	e.logger.Debug("SaveDrawState called for lockKey=%s, progress=%.1f%%",
 		drawState.LockKey, drawState.Progress())
 
@@ -303,35 +344,99 @@ func (e *LotteryEngine) SaveDrawState(ctx context.Context, drawState *DrawState)
 	// Update timestamp
 	drawState.LastUpdateTime = time.Now().Unix()
 
-	// FIXME:
-	// For now, we just log the state save
-	// In a real implementation, this might involve:
-	// 1. Serializing the state to JSON
-	// 2. Storing it in Redis with an expiration time
-	// 3. Using a key based on lockKey and operation ID
+	// Create state persistence manager
+	spm := NewStatePersistenceManager(e.redisClient, e.logger)
 
-	e.logger.Debug("Draw state saved for lockKey=%s", drawState.LockKey)
+	// Generate Redis key for this state
+	stateKey := generateStateKey(drawState.LockKey)
+	if stateKey == "" {
+		e.logger.Error("SaveDrawState failed: unable to generate state key for lockKey=%s", drawState.LockKey)
+		return ErrInvalidParameters
+	}
+
+	// Save state to Redis with TTL
+	if err := spm.saveState(ctx, stateKey, drawState, DefaultStateTTL); err != nil {
+		e.logger.Error("SaveDrawState failed to save to Redis: lockKey=%s, error=%v", drawState.LockKey, err)
+		return err
+	}
+
+	e.logger.Info("Draw state saved successfully: lockKey=%s, stateKey=%s, progress=%.1f%%",
+		drawState.LockKey, stateKey, drawState.Progress())
 	return nil
 }
 
-// LoadDrawState loads a previously saved draw state
-// This is a placeholder for future implementation of state recovery
+// LoadDrawState loads a previously saved draw state from Redis
 func (e *LotteryEngine) LoadDrawState(ctx context.Context, lockKey string) (*DrawState, error) {
 	e.logger.Debug("LoadDrawState called for lockKey=%s", lockKey)
 
 	if lockKey == "" {
+		e.logger.Error("LoadDrawState failed: empty lock key")
 		return nil, ErrInvalidParameters
 	}
 
-	// FIXME:
-	// For now, we return nil to indicate no saved state found
-	// In a real implementation, this might involve:
-	// 1. Loading serialized state from Redis
-	// 2. Deserializing from JSON
-	// 3. Validating the loaded state
+	// Create state persistence manager
+	spm := NewStatePersistenceManager(e.redisClient, e.logger)
 
-	e.logger.Debug("No saved state found for lockKey=%s", lockKey)
-	return nil, nil
+	// Find all state keys for this lock key
+	stateKeys, err := spm.findStateKeys(ctx, lockKey)
+	if err != nil {
+		e.logger.Error("LoadDrawState failed to find state keys: lockKey=%s, error=%v", lockKey, err)
+		return nil, err
+	}
+
+	if len(stateKeys) == 0 {
+		e.logger.Debug("No saved state found for lockKey=%s", lockKey)
+		return nil, nil
+	}
+
+	// Find the most recent state key (based on operation ID timestamp)
+	var mostRecentKey string
+	var mostRecentTime string
+	for _, key := range stateKeys {
+		_, operationID, parseErr := parseStateKey(key)
+		if parseErr != nil {
+			e.logger.Debug("Skipping invalid state key: %s, error=%v", key, parseErr)
+			continue
+		}
+
+		// Extract timestamp from operation ID (format: YYYYMMDD_HHMMSS_randomhex)
+		if len(operationID) >= 15 { // At least YYYYMMDD_HHMMSS
+			timestamp := operationID[:15] // YYYYMMDD_HHMMSS
+			if mostRecentTime == "" || timestamp > mostRecentTime {
+				mostRecentTime = timestamp
+				mostRecentKey = key
+			}
+		}
+	}
+
+	if mostRecentKey == "" {
+		e.logger.Debug("No valid state keys found for lockKey=%s", lockKey)
+		return nil, nil
+	}
+
+	// Load the most recent state
+	drawState, err := spm.loadState(ctx, mostRecentKey)
+	if err != nil {
+		e.logger.Error("LoadDrawState failed to load state: lockKey=%s, stateKey=%s, error=%v",
+			lockKey, mostRecentKey, err)
+		return nil, err
+	}
+
+	if drawState == nil {
+		e.logger.Debug("State key exists but no data found: lockKey=%s, stateKey=%s", lockKey, mostRecentKey)
+		return nil, nil
+	}
+
+	// Validate the loaded state
+	if err := drawState.Validate(); err != nil {
+		e.logger.Error("LoadDrawState loaded invalid state: lockKey=%s, stateKey=%s, error=%v",
+			lockKey, mostRecentKey, err)
+		return nil, ErrDrawStateCorrupted
+	}
+
+	e.logger.Info("Draw state loaded successfully: lockKey=%s, stateKey=%s, progress=%.1f%%",
+		lockKey, mostRecentKey, drawState.Progress())
+	return drawState, nil
 }
 
 // ResumeMultiDrawInRange resumes a previously interrupted multi-draw range operation

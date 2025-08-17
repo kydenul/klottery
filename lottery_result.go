@@ -1,10 +1,57 @@
 package lottery
 
+import (
+	"encoding/json"
+)
+
 // DrawError represents an error that occurred during a specific draw
 type DrawError struct {
-	DrawIndex int   `json:"draw_index"` // Index of the draw that failed (1-based)
-	Error     error `json:"error"`      // The error that occurred
-	Timestamp int64 `json:"timestamp"`  // Unix timestamp when the error occurred
+	DrawIndex int    `json:"draw_index"`    // Index of the draw that failed (1-based)
+	Error     error  `json:"-"`             // The error that occurred (not serialized)
+	ErrorMsg  string `json:"error_message"` // Error message for serialization
+	Timestamp int64  `json:"timestamp"`     // Unix timestamp when the error occurred
+}
+
+// MarshalJSON implements custom JSON marshaling for DrawError
+func (de DrawError) MarshalJSON() ([]byte, error) {
+	// Create a temporary struct for marshaling
+	temp := struct {
+		DrawIndex int    `json:"draw_index"`
+		ErrorMsg  string `json:"error_message"`
+		Timestamp int64  `json:"timestamp"`
+	}{
+		DrawIndex: de.DrawIndex,
+		ErrorMsg:  de.ErrorMsg,
+		Timestamp: de.Timestamp,
+	}
+
+	// If ErrorMsg is empty but Error is not nil, use Error.Error()
+	if temp.ErrorMsg == "" && de.Error != nil {
+		temp.ErrorMsg = de.Error.Error()
+	}
+
+	return json.Marshal(temp)
+}
+
+// UnmarshalJSON implements custom JSON unmarshaling for DrawError
+func (de *DrawError) UnmarshalJSON(data []byte) error {
+	// Create a temporary struct for unmarshaling
+	temp := struct {
+		DrawIndex int    `json:"draw_index"`
+		ErrorMsg  string `json:"error_message"`
+		Timestamp int64  `json:"timestamp"`
+	}{}
+
+	if err := json.Unmarshal(data, &temp); err != nil {
+		return err
+	}
+
+	de.DrawIndex = temp.DrawIndex
+	de.ErrorMsg = temp.ErrorMsg
+	de.Timestamp = temp.Timestamp
+	// Note: Error field is not restored from JSON, only ErrorMsg is available
+
+	return nil
 }
 
 // LotteryResult represents the result of a lottery draw
