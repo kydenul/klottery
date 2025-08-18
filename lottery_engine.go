@@ -1371,3 +1371,168 @@ func (e *LotteryEngine) DrawFromPrizesOptimized(ctx context.Context, lockKey str
 
 	return result, err
 }
+
+// DrawMultipleFromPrizesOptimized draws multiple prizes with performance optimizations
+func (e *LotteryEngine) DrawMultipleFromPrizesOptimized(
+	ctx context.Context, lockKey string, prizes []Prize, count int, progressCallback ProgressCallback,
+) (*MultiDrawResult, error) {
+	startTime := time.Now()
+	e.logger.Debug("DrawMultipleFromPrizesOptimized called for lockKey=%s, count=%d", lockKey, count)
+
+	// Validate input parameters
+	if lockKey == "" {
+		e.logger.Error("DrawMultipleFromPrizesOptimized lockKey validation failed: empty lockKey")
+		return nil, ErrInvalidParameters
+	}
+	if len(prizes) == 0 {
+		e.logger.Error("DrawMultipleFromPrizesOptimized prizes validation failed: empty prize pool")
+		return nil, ErrEmptyPrizePool
+	}
+	if err := ValidateCount(count); err != nil {
+		e.logger.Error("DrawMultipleFromPrizesOptimized count validation failed: %v", err)
+		return nil, err
+	}
+
+	// Validate prize pool
+	if err := ValidatePrizePool(prizes); err != nil {
+		e.logger.Error("DrawMultipleFromPrizesOptimized prize pool validation failed: %v", err)
+		return nil, err
+	}
+
+	// Initialize result
+	result := &MultiDrawResult{
+		TotalRequested: count,
+		Completed:      0,
+		Failed:         0,
+		PartialSuccess: false,
+		PrizeResults:   make([]*Prize, 0, count),
+		ErrorDetails:   make([]DrawError, 0),
+	}
+
+	// Create distributed lock manager
+	lockManager := NewLockManager(e.redisClient, e.config.LockTimeout)
+
+	// Create prize selector for optimized selection
+	selector := NewDefaultPrizeSelector()
+
+	// Determine batch size for optimization
+	batchSize := calculateOptimalBatchSize(count)
+
+	// Process in batches
+	for batchStart := 0; batchStart < count; batchStart += batchSize {
+		batchEnd := batchStart + batchSize
+		if batchEnd > count {
+			batchEnd = count
+		}
+		currentBatchSize := batchEnd - batchStart
+
+		// Check context cancellation
+		select {
+		case <-ctx.Done():
+			e.logger.Info("DrawMultipleFromPrizesOptimized cancelled after %d draws", result.Completed)
+			result.PartialSuccess = true
+			result.LastError = ctx.Err()
+			return result, ErrDrawInterrupted
+		default:
+		}
+
+		// Process batch
+		batchSuccesses := 0
+		for i := range currentBatchSize {
+			drawIndex := batchStart + i
+
+			// Generate a unique lock value for this draw
+			lockValue := generateLockValue()
+
+			// Acquire distributed lock for this draw
+			acquired, err := lockManager.AcquireLock(ctx, lockKey, lockValue, DefaultLockExpiration)
+			if err != nil {
+				drawError := DrawError{
+					DrawIndex: drawIndex + 1,
+					Error:     err,
+					ErrorMsg:  err.Error(),
+					Timestamp: time.Now().Unix(),
+				}
+				result.ErrorDetails = append(result.ErrorDetails, drawError)
+				result.Failed++
+				result.LastError = err
+				continue
+			}
+
+			if !acquired {
+				drawError := DrawError{
+					DrawIndex: drawIndex + 1,
+					Error:     ErrLockAcquisitionFailed,
+					ErrorMsg:  ErrLockAcquisitionFailed.Error(),
+					Timestamp: time.Now().Unix(),
+				}
+				result.ErrorDetails = append(result.ErrorDetails, drawError)
+				result.Failed++
+				result.LastError = ErrLockAcquisitionFailed
+				continue
+			}
+
+			// Perform the prize draw
+			prize, err := selector.SelectPrize(prizes)
+			if err != nil {
+				// Release lock before continuing
+				lockManager.ReleaseLock(ctx, lockKey, lockValue)
+
+				drawError := DrawError{
+					DrawIndex: drawIndex + 1,
+					Error:     err,
+					ErrorMsg:  err.Error(),
+					Timestamp: time.Now().Unix(),
+				}
+				result.ErrorDetails = append(result.ErrorDetails, drawError)
+				result.Failed++
+				result.LastError = err
+				continue
+			}
+
+			// Add result
+			result.PrizeResults = append(result.PrizeResults, prize)
+			result.Completed++
+			batchSuccesses++
+
+			// Release lock
+			if _, err := lockManager.ReleaseLock(ctx, lockKey, lockValue); err != nil {
+				e.logger.Error("Failed to release lock for draw %d: %v", drawIndex+1, err)
+			}
+
+			// Call progress callback if provided
+			if progressCallback != nil {
+				progressCallback(result.Completed, count, prize)
+			}
+		}
+
+		// Log batch completion
+		e.logger.Debug("Batch completed: %d/%d draws successful in batch starting at %d",
+			batchSuccesses, currentBatchSize, batchStart)
+	}
+
+	// Set partial success flag if some draws failed
+	if result.Failed > 0 && result.Completed > 0 {
+		result.PartialSuccess = true
+	}
+
+	// Log final results
+	duration := time.Since(startTime)
+	e.logger.Info("DrawMultipleFromPrizesOptimized completed: lockKey=%s, requested=%d, completed=%d, failed=%d, duration=%v",
+		lockKey, count, result.Completed, result.Failed, duration)
+
+	// Record performance metrics
+	e.performanceMonitor.RecordDraw(result.Failed == 0, duration)
+
+	// Return appropriate error if all draws failed
+	if result.Completed == 0 {
+		return result, ErrPartialDrawFailure
+	}
+
+	// Return partial failure error if some draws failed
+	if result.Failed > 0 {
+		return result, ErrPartialDrawFailure
+	}
+
+	return result, nil
+}

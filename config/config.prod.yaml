@@ -1,0 +1,148 @@
+# 生产环境配置
+# 高安全性、高可用性配置
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout: "60s"
+  write_timeout: "60s"
+  idle_timeout: "300s"
+
+# Redis 配置
+redis:
+  addr: "${REDIS_ADDR:redis-cluster:6379}"
+  password: "${REDIS_PASSWORD}"
+  db: 0
+  pool_size: 200
+  min_idle_conns: 20
+  max_retries: 5
+  dial_timeout: "10s"
+  read_timeout: "5s"
+  write_timeout: "5s"
+  pool_timeout: "8s"
+  cluster_mode: true
+  cluster_addrs:
+    - "${REDIS_NODE1:redis-node1:6379}"
+    - "${REDIS_NODE2:redis-node2:6379}"
+    - "${REDIS_NODE3:redis-node3:6379}"
+  tls_enabled: true
+  cert_file: "/etc/ssl/certs/redis-client.crt"
+  key_file: "/etc/ssl/private/redis-client.key"
+  ca_file: "/etc/ssl/certs/redis-ca.crt"
+
+# 抽奖引擎配置
+lottery:
+  lock_timeout: "60s"
+  retry_attempts: 5
+  retry_interval: "200ms"
+  state_ttl: "2h"
+  max_serialization_mb: 20
+  state_cleanup_interval: "2h"
+  batch_size: 200
+  concurrency_limit: 5000
+  cache_enabled: true
+  cache_ttl: "10m"
+  cache_max_size: 50000
+  rate_limit_enabled: true
+  rate_limit_rps: 5000.0
+  rate_limit_burst: 500
+
+# 安全配置 (生产环境启用所有安全功能)
+security:
+  enable_auth: true
+  jwt_secret: "${JWT_SECRET}"
+  token_expiry: "8h"
+  refresh_expiry: "72h"
+  enable_encryption: true
+  encryption_key: "${ENCRYPTION_KEY}"
+  encryption_algo: "AES-256-GCM"
+  enable_ip_whitelist: true
+  ip_whitelist:
+    - "10.0.0.0/8"
+    - "172.16.0.0/12"
+    - "192.168.0.0/16"
+  enable_cors: true
+  cors_origins:
+    - "https://lottery.example.com"
+    - "https://admin.example.com"
+  enable_audit: true
+  audit_log_path: "/var/log/lottery/audit.log"
+  audit_log_level: "info"
+  audit_retention_days: 90
+
+# 监控配置
+monitoring:
+  enable_metrics: true
+  metrics_addr: ":9090"
+  metrics_path: "/metrics"
+  enable_health_check: true
+  health_check_addr: ":8081"
+  health_check_path: "/health"
+  health_check_interval: "30s"
+  enable_tracing: true
+  tracing_endpoint: "${JAEGER_ENDPOINT:http://jaeger:14268/api/traces}"
+  tracing_sampler: 0.01
+  service_name: "lottery-service"
+  enable_alerting: true
+  alerting_webhooks:
+    - "${SLACK_WEBHOOK_URL}"
+    - "${PAGERDUTY_WEBHOOK_URL}"
+  alerting_rules:
+    - name: "critical_error_rate"
+      metric: "lottery_error_rate"
+      threshold: 0.01
+      operator: ">"
+      duration: "2m"
+      severity: "critical"
+      description: "Critical: Error rate exceeded 1%"
+    - name: "high_error_rate"
+      metric: "lottery_error_rate"
+      threshold: 0.005
+      operator: ">"
+      duration: "5m"
+      severity: "warning"
+      description: "Warning: Error rate exceeded 0.5%"
+    - name: "redis_connection_failure"
+      metric: "redis_connection_failures"
+      threshold: 5
+      operator: ">"
+      duration: "1m"
+      severity: "critical"
+      description: "Critical: Redis connection failures"
+    - name: "high_response_time"
+      metric: "lottery_response_time_p99"
+      threshold: 1000
+      operator: ">"
+      duration: "3m"
+      severity: "warning"
+      description: "Warning: P99 response time > 1s"
+    - name: "circuit_breaker_open"
+      metric: "circuit_breaker_state"
+      threshold: 2
+      operator: "=="
+      duration: "30s"
+      severity: "critical"
+      description: "Critical: Circuit breaker is open"
+
+# 日志配置
+logging:
+  level: "info"
+  format: "json"
+  output: "file"
+  file_path: "/var/log/lottery/app.log"
+  max_size: 500
+  max_backups: 10
+  max_age: 30
+  compress: true
+
+# 熔断器配置 (生产环境严格配置)
+circuit_breaker:
+  enabled: true
+  name: "lottery-engine-prod"
+  max_requests: 3
+  interval: "120s"
+  timeout: "60s"
+  failure_ratio: 0.5
+  min_requests: 5
+  on_state_change: true

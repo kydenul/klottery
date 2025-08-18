@@ -1,0 +1,147 @@
+# 线程安全抽奖系统配置文件
+# 生产环境配置示例
+
+# 服务器配置
+server:
+  host: "0.0.0.0"
+  port: 8080
+  read_timeout: "30s"
+  write_timeout: "30s"
+  idle_timeout: "120s"
+
+# Redis 配置
+redis:
+  # 基础连接配置
+  addr: "localhost:6379"
+  password: ""
+  db: 0
+  
+  # 连接池配置
+  pool_size: 100
+  min_idle_conns: 10
+  max_retries: 3
+  
+  # 超时配置
+  dial_timeout: "5s"
+  read_timeout: "3s"
+  write_timeout: "3s"
+  pool_timeout: "4s"
+  
+  # 集群配置 (可选)
+  cluster_mode: false
+  cluster_addrs: []
+  
+  # TLS 配置 (可选)
+  tls_enabled: false
+  cert_file: ""
+  key_file: ""
+  ca_file: ""
+
+# 抽奖引擎配置
+lottery:
+  # 锁配置
+  lock_timeout: "30s"
+  retry_attempts: 3
+  retry_interval: "100ms"
+  
+  # 状态持久化配置
+  state_ttl: "1h"
+  max_serialization_mb: 10
+  state_cleanup_interval: "1h"
+  
+  # 性能配置
+  batch_size: 100
+  concurrency_limit: 1000
+  cache_enabled: true
+  cache_ttl: "5m"
+  cache_max_size: 10000
+  
+  # 限流配置
+  rate_limit_enabled: false
+  rate_limit_rps: 1000.0
+  rate_limit_burst: 100
+
+# 安全配置
+security:
+  # 认证配置
+  enable_auth: false
+  jwt_secret: "your-jwt-secret-key-here"
+  token_expiry: "24h"
+  refresh_expiry: "168h"
+  
+  # 加密配置
+  enable_encryption: false
+  encryption_key: "your-encryption-key-here"
+  encryption_algo: "AES-256-GCM"
+  
+  # 访问控制
+  enable_ip_whitelist: false
+  ip_whitelist: []
+  enable_cors: false
+  cors_origins: ["*"]
+  
+  # 审计配置
+  enable_audit: false
+  audit_log_path: "/var/log/lottery/audit.log"
+  audit_log_level: "info"
+  audit_retention_days: 30
+
+# 监控配置
+monitoring:
+  # Prometheus 配置
+  enable_metrics: true
+  metrics_addr: ":9090"
+  metrics_path: "/metrics"
+  
+  # 健康检查配置
+  enable_health_check: true
+  health_check_addr: ":8081"
+  health_check_path: "/health"
+  health_check_interval: "30s"
+  
+  # 链路追踪配置
+  enable_tracing: false
+  tracing_endpoint: "http://localhost:14268/api/traces"
+  tracing_sampler: 0.1
+  service_name: "lottery-service"
+  
+  # 告警配置
+  enable_alerting: false
+  alerting_webhooks: []
+  alerting_rules:
+    - name: "high_error_rate"
+      metric: "lottery_error_rate"
+      threshold: 0.05
+      operator: ">"
+      duration: "5m"
+      severity: "warning"
+      description: "Error rate is above 5%"
+    - name: "redis_connection_failure"
+      metric: "redis_connection_failures"
+      threshold: 10
+      operator: ">"
+      duration: "1m"
+      severity: "critical"
+      description: "Redis connection failures exceeded threshold"
+
+# 日志配置
+logging:
+  level: "info"
+  format: "json"
+  output: "stdout"
+  file_path: "/var/log/lottery/app.log"
+  max_size: 100
+  max_backups: 3
+  max_age: 28
+  compress: true
+
+# 熔断器配置
+circuit_breaker:
+  enabled: true
+  name: "lottery-engine"
+  max_requests: 3
+  interval: "60s"
+  timeout: "30s"
+  failure_ratio: 0.6
+  min_requests: 3
+  on_state_change: true

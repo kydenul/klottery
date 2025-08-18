@@ -315,18 +315,23 @@ func (spm *StatePersistenceManager) loadState(ctx context.Context, key string) (
 	loadStart := time.Now()
 	err = spm.executeWithRetry(ctx, fmt.Sprintf("load[%s]", key), func() error {
 		data, err = spm.redisClient.Get(ctx, key).Bytes()
+		if err == redis.Nil {
+			// Key doesn't exist - this is not an error condition, don't retry
+			return nil
+		}
 		return err
 	})
 	loadDuration := time.Since(loadStart)
 
 	if err != nil {
-		if err == redis.Nil {
-			// Key doesn't exist - this is not an error condition
-			spm.logger.Debug("No saved state found: key=%s, load_time=%v", key, loadDuration)
-			return nil, nil
-		}
 		spm.logger.Error("Failed to load state from Redis after retries: key=%s, load_time=%v, error=%v", key, loadDuration, err)
 		return nil, fmt.Errorf("Redis load operation failed for key=%s (load_time=%v): %w", key, loadDuration, err)
+	}
+
+	// Check if key doesn't exist (data will be nil if redis.Nil was returned)
+	if len(data) == 0 {
+		spm.logger.Debug("No saved state found: key=%s, load_time=%v", key, loadDuration)
+		return nil, nil
 	}
 
 	spm.logger.Debug("Loaded raw data from Redis in %v: key=%s, size=%d bytes", loadDuration, key, len(data))

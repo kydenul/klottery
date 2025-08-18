@@ -10,30 +10,35 @@
 ## ✨ 核心特性
 
 ### 🔒 线程安全与分布式锁
+
 - **分布式锁机制**: 基于 Redis 实现的高性能分布式锁
 - **锁超时保护**: 防止死锁，支持自定义超时时间
 - **原子操作**: 使用 Lua 脚本确保操作原子性
 - **并发安全**: 支持多实例并发访问
 
 ### 🎯 多样化抽奖模式
+
 - **范围抽奖**: 在指定数值范围内随机抽取
 - **奖品池抽奖**: 基于概率权重的奖品抽取
 - **批量抽奖**: 支持一次性进行多次抽奖
 - **恢复机制**: 支持中断后的状态恢复
 
 ### 💾 状态持久化
+
 - **Redis 持久化**: 抽奖状态自动保存到 Redis
 - **状态恢复**: 支持从中断点恢复抽奖操作
 - **TTL 管理**: 自动清理过期状态数据
 - **序列化优化**: 高效的 JSON 序列化/反序列化
 
 ### 🚀 高性能设计
+
 - **连接池**: Redis 连接池管理
 - **批量操作**: 支持批量抽奖减少网络开销
 - **缓存优化**: 智能缓存机制提升性能
 - **异步处理**: 支持异步操作和回调
 
 ### 🛡️ 错误处理与监控
+
 - **重试机制**: 指数退避重试策略
 - **错误恢复**: 完善的错误处理和恢复机制
 - **性能监控**: 内置性能指标收集
@@ -144,6 +149,7 @@ func main() {
 ### 核心组件
 
 #### 1. LotteryEngine - 抽奖引擎
+
 主要的抽奖接口，提供所有抽奖功能：
 
 ```go
@@ -162,6 +168,7 @@ engine := lottery.NewLotteryEngineWithConfig(redisClient, config)
 #### 2. 抽奖模式
 
 **范围抽奖**
+
 ```go
 // 单次抽奖
 result, err := engine.DrawInRange(ctx, "user:123", 1, 100)
@@ -174,6 +181,7 @@ multiResult, err := engine.DrawMultipleInRangeWithRecovery(ctx, "user:123", 1, 1
 ```
 
 **奖品池抽奖**
+
 ```go
 prizes := []lottery.Prize{
     {ID: "gold", Name: "金奖", Probability: 0.1, Value: 1000},
@@ -244,6 +252,7 @@ ErrDrawStateCorrupted    // 状态数据损坏
 ## 🎯 使用场景
 
 ### 1. 电商促销活动
+
 ```go
 // 限时抢购抽奖
 prizes := []lottery.Prize{
@@ -256,6 +265,7 @@ prize, err := engine.DrawFromPrizes(ctx, "flash_sale:20241201", prizes)
 ```
 
 ### 2. 游戏道具抽取
+
 ```go
 // 装备抽取
 equipment := []lottery.Prize{
@@ -270,6 +280,7 @@ results, err := engine.DrawMultipleFromPrizes(ctx, "player:123:gacha", equipment
 ```
 
 ### 3. 营销活动
+
 ```go
 // 每日签到奖励
 dailyRewards := []lottery.Prize{
@@ -420,30 +431,35 @@ lottery/
 ## 🌟 项目优点
 
 ### 1. 🔒 **高可靠性**
+
 - **分布式锁**: 基于 Redis 的分布式锁确保并发安全
 - **原子操作**: Lua 脚本保证操作原子性
 - **状态持久化**: 完整的状态保存和恢复机制
 - **错误恢复**: 完善的错误处理和重试机制
 
 ### 2. 🚀 **高性能**
+
 - **连接池管理**: 高效的 Redis 连接池
 - **批量操作**: 减少网络开销的批量处理
 - **序列化优化**: 高效的 JSON 序列化
 - **缓存机制**: 智能缓存提升响应速度
 
 ### 3. 🎯 **功能丰富**
+
 - **多种抽奖模式**: 范围抽奖、奖品池抽奖、批量抽奖
 - **概率控制**: 精确的概率权重控制
 - **状态管理**: 完整的状态保存、加载、恢复
 - **监控统计**: 内置性能监控和统计
 
 ### 4. 🛠️ **易于使用**
+
 - **简洁 API**: 直观易用的接口设计
 - **丰富示例**: 完整的使用示例和文档
 - **配置灵活**: 支持自定义配置和扩展
 - **类型安全**: 完整的类型定义和验证
 
 ### 5. 🧪 **测试完善**
+
 - **高覆盖率**: 95%+ 的测试覆盖率
 - **多层测试**: 单元测试、集成测试、基准测试
 - **边界测试**: 完整的边界条件和异常场景测试
@@ -452,24 +468,28 @@ lottery/
 ## ⚠️ 项目不足
 
 ### 1. 🔧 **技术限制**
+
 - **Redis 依赖**: 强依赖 Redis，无法在无 Redis 环境使用
 - **网络延迟**: 分布式操作存在网络延迟
 - **内存消耗**: 大量状态数据可能消耗较多内存
 - **单点故障**: Redis 故障会影响整个系统
 
 ### 2. 📊 **功能局限**
+
 - **概率算法**: 目前仅支持基础的概率权重算法
 - **统计分析**: 缺少详细的抽奖数据分析功能
 - **实时监控**: 监控功能相对简单，缺少实时告警
 - **数据导出**: 缺少数据导出和报表功能
 
 ### 3. 🔐 **安全考虑**
+
 - **权限控制**: 缺少细粒度的权限控制机制
 - **审计日志**: 缺少完整的操作审计日志
 - **数据加密**: 状态数据未加密存储
 - **访问限制**: 缺少 IP 白名单等访问控制
 
 ### 4. 🌐 **扩展性**
+
 - **水平扩展**: Redis 集群支持有限
 - **多数据中心**: 缺少跨数据中心的支持
 - **插件机制**: 缺少插件化的扩展机制
@@ -480,6 +500,7 @@ lottery/
 ### 1. 🚀 **性能优化**
 
 #### 连接池优化
+
 ```go
 // 建议配置
 redis.NewClient(&redis.Options{
@@ -494,6 +515,7 @@ redis.NewClient(&redis.Options{
 ```
 
 #### 批量操作优化
+
 ```go
 // 使用 Pipeline 减少网络往返
 pipe := rdb.Pipeline()
@@ -504,6 +526,7 @@ _, err := pipe.Exec(ctx)
 ```
 
 #### 序列化优化
+
 ```go
 // 考虑使用更高效的序列化格式
 // 1. Protocol Buffers
@@ -514,6 +537,7 @@ _, err := pipe.Exec(ctx)
 ### 2. 🔧 **功能增强**
 
 #### 多级缓存
+
 ```go
 // 添加本地缓存层
 type CachedLotteryEngine struct {
@@ -524,6 +548,7 @@ type CachedLotteryEngine struct {
 ```
 
 #### 概率算法增强
+
 ```go
 // 支持更多概率分布
 type ProbabilityDistribution interface {
@@ -540,6 +565,7 @@ type CustomDistribution struct{}
 ```
 
 #### 实时监控
+
 ```go
 // 集成 Prometheus 监控
 type PrometheusMonitor struct {
@@ -552,6 +578,7 @@ type PrometheusMonitor struct {
 ### 3. 🔐 **安全增强**
 
 #### 权限控制
+
 ```go
 // 基于角色的访问控制
 type RBACManager struct {
@@ -566,6 +593,7 @@ type Permission struct {
 ```
 
 #### 数据加密
+
 ```go
 // 状态数据加密存储
 type EncryptedStatePersistence struct {
@@ -575,6 +603,7 @@ type EncryptedStatePersistence struct {
 ```
 
 #### 审计日志
+
 ```go
 // 操作审计
 type AuditLogger struct {
@@ -589,6 +618,7 @@ func (a *AuditLogger) LogOperation(userID, operation string, params interface{})
 ### 4. 🌐 **架构优化**
 
 #### 微服务化
+
 ```
 ┌─────────────┐    ┌─────────────┐    ┌─────────────┐
 │   Gateway   │    │   Gateway   │    │   Gateway   │
@@ -601,6 +631,7 @@ func (a *AuditLogger) LogOperation(userID, operation string, params interface{})
 ```
 
 #### 消息队列集成
+
 ```go
 // 异步处理
 type AsyncLotteryEngine struct {
@@ -611,6 +642,7 @@ type AsyncLotteryEngine struct {
 ```
 
 #### 多数据中心支持
+
 ```go
 // 跨数据中心复制
 type MultiDCLotteryEngine struct {
@@ -622,6 +654,7 @@ type MultiDCLotteryEngine struct {
 ### 5. 📊 **监控和运维**
 
 #### 健康检查
+
 ```go
 // 健康检查端点
 func (e *LotteryEngine) HealthCheck() HealthStatus {
@@ -635,6 +668,7 @@ func (e *LotteryEngine) HealthCheck() HealthStatus {
 ```
 
 #### 配置热更新
+
 ```go
 // 支持配置热更新
 type ConfigManager struct {
@@ -648,6 +682,7 @@ func (c *ConfigManager) UpdateConfig(newConfig *LotteryConfig) error {
 ```
 
 #### 自动扩缩容
+
 ```go
 // 基于负载的自动扩缩容
 type AutoScaler struct {
@@ -697,9 +732,9 @@ type AutoScaler struct {
 
 ## 📞 联系我们
 
-- **项目主页**: https://github.com/kydenul/lottery
-- **问题反馈**: https://github.com/kydenul/lottery/issues
-- **邮箱**: kydenul@example.com
+- **项目主页**: <https://github.com/kydenul/lottery>
+- **问题反馈**: <https://github.com/kydenul/lottery/issues>
+- **邮箱**: <kydenul@example.com>
 
 ---
 
