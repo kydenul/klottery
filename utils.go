@@ -42,3 +42,20 @@ func generateLockValue() string {
 
 	return string(result)
 }
+
+// calculateOptimalBatchSize determines the optimal batch size based on the total count
+func calculateOptimalBatchSize(totalCount int) int {
+	// Use a heuristic to determine batch size
+	// For small counts, use smaller batches to reduce memory usage
+	// For large counts, use larger batches to improve performance
+
+	if totalCount <= 10 {
+		return 1 // No batching for very small counts
+	} else if totalCount <= 100 {
+		return 10 // Small batches for moderate counts
+	} else if totalCount <= 1000 {
+		return 50 // Medium batches for large counts
+	} else {
+		return 100 // Large batches for very large counts
+	}
+}

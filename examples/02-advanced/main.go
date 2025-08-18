@@ -52,6 +52,7 @@ func customConfigExample(ctx context.Context, rdb *redis.Client) {
 		10*time.Second,       // 锁超时时间
 		5,                    // 重试次数
 		200*time.Millisecond, // 重试间隔
+		1*time.Second,        // Lock Cache TTL
 	)
 	if err != nil {
 		fmt.Printf("❌ 配置创建失败: %v\n", err)
@@ -61,7 +62,7 @@ func customConfigExample(ctx context.Context, rdb *redis.Client) {
 	// 使用自定义配置创建引擎
 	engine := lottery.NewLotteryEngineWithConfig(rdb, config)
 	fmt.Printf("✓ 自定义配置引擎创建成功 (锁超时: %v, 重试: %d次)\n",
-		config.LockTimeout, config.RetryAttempts)
+		config.GetConfig().Engine.LockTimeout, config.GetConfig().Engine.RetryAttempts)
 
 	// 测试抽奖
 	result, err := engine.DrawInRange(ctx, "custom_config_demo", 1, 100)
@@ -172,7 +173,7 @@ func runtimeConfigExample(ctx context.Context, rdb *redis.Client) {
 	// 获取当前配置
 	currentConfig := engine.GetConfig()
 	fmt.Printf("当前配置: 锁超时=%v, 重试次数=%d\n",
-		currentConfig.LockTimeout, currentConfig.RetryAttempts)
+		currentConfig.Engine.LockTimeout, currentConfig.Engine.RetryAttempts)
 
 	// 更新锁超时时间
 	err := engine.SetLockTimeout(5 * time.Second)
@@ -193,7 +194,7 @@ func runtimeConfigExample(ctx context.Context, rdb *redis.Client) {
 	// 验证配置更新
 	updatedConfig := engine.GetConfig()
 	fmt.Printf("更新后配置: 锁超时=%v, 重试次数=%d\n",
-		updatedConfig.LockTimeout, updatedConfig.RetryAttempts)
+		updatedConfig.Engine.LockTimeout, updatedConfig.Engine.RetryAttempts)
 
 	// 测试更新后的配置
 	result, err := engine.DrawInRange(ctx, "runtime_config_demo", 1, 100)

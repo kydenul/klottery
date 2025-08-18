@@ -619,7 +619,8 @@ func TestOptimizedRedisConfig(t *testing.T) {
 
 	t.Run("创建优化的Redis客户端", func(t *testing.T) {
 		config := DefaultRedisConfig()
-		client := NewRedisClient("localhost:6379", config)
+		config.Addr = "localhost:6379"
+		client := NewRedisClientFromConfig(config)
 
 		assert.NotNil(t, client)
 		defer client.Close()
@@ -627,7 +628,7 @@ func TestOptimizedRedisConfig(t *testing.T) {
 }
 
 func TestEnhancedLotteryEngine(t *testing.T) {
-	rdb := NewRedisClient("localhost:6379", DefaultRedisConfig())
+	rdb := NewRedisClientFromConfig(DefaultRedisConfig())
 	rdb.Options().DB = 3 // 使用测试数据库
 
 	// 测试Redis连接
@@ -641,7 +642,7 @@ func TestEnhancedLotteryEngine(t *testing.T) {
 		rdb.Close()
 	}()
 
-	config := NewDefaultLotteryConfig()
+	config := NewDefaultConfigManager()
 	engine := NewLotteryEngineWithConfig(rdb, config)
 
 	t.Run("带监控的范围抽奖", func(t *testing.T) {
@@ -723,7 +724,7 @@ func TestEnhancedBatchLockManager(t *testing.T) {
 		rdb.Close()
 	}()
 
-	batchManager := NewBatchLockManager(rdb, 30*time.Second, 3, 100*time.Millisecond)
+	batchManager := NewBatchLockManager(rdb, 30*time.Second, 3, 100*time.Millisecond, 1*time.Second)
 
 	t.Run("批量获取和释放锁", func(t *testing.T) {
 		ctx := context.Background()
@@ -786,7 +787,7 @@ func TestEnhancedBatchLockManager(t *testing.T) {
 }
 
 func TestPerformanceMonitoringControl(t *testing.T) {
-	rdb := NewRedisClient("localhost:6379", DefaultRedisConfig())
+	rdb := NewRedisClientFromConfig(DefaultRedisConfig())
 	rdb.Options().DB = 3 // 使用测试数据库
 
 	// 测试Redis连接
@@ -800,7 +801,7 @@ func TestPerformanceMonitoringControl(t *testing.T) {
 		rdb.Close()
 	}()
 
-	config := NewDefaultLotteryConfig()
+	config := NewDefaultConfigManager()
 	engine := NewLotteryEngineWithConfig(rdb, config)
 
 	t.Run("性能监控控制", func(t *testing.T) {
@@ -869,7 +870,7 @@ func TestPerformanceMonitoringControl(t *testing.T) {
 
 // BenchmarkOptimizedVsStandardPerformance 优化版本与标准版本的性能对比基准测试
 func BenchmarkOptimizedVsStandardPerformance(b *testing.B) {
-	rdb := NewRedisClient("localhost:6379", DefaultRedisConfig())
+	rdb := NewRedisClientFromConfig(DefaultRedisConfig())
 	rdb.Options().DB = 3 // 使用测试数据库
 
 	// 测试Redis连接
@@ -883,7 +884,7 @@ func BenchmarkOptimizedVsStandardPerformance(b *testing.B) {
 		rdb.Close()
 	}()
 
-	config := NewDefaultLotteryConfig()
+	config := NewDefaultConfigManager()
 	standardEngine := NewLotteryEngineWithConfigAndLogger(rdb, config, NewSilentLogger())
 	optimizedEngine := NewLotteryEngineWithConfig(rdb, config)
 

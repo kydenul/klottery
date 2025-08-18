@@ -9,7 +9,8 @@ import (
 
 // CircuitBreakerEngine 带熔断器的抽奖引擎
 type CircuitBreakerEngine struct {
-	engine  LotteryDrawer
+	engine LotteryDrawer
+
 	breaker *gobreaker.CircuitBreaker
 	logger  Logger
 	config  *CircuitBreakerConfig
@@ -36,7 +37,7 @@ func NewCircuitBreakerEngine(engine LotteryDrawer, config *CircuitBreakerConfig,
 			return counts.Requests >= config.MinRequests &&
 				float64(counts.TotalFailures)/float64(counts.Requests) >= config.FailureRatio
 		},
-		OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+		OnStateChange: func(name string, from, to gobreaker.State) {
 			if config.OnStateChange && logger != nil {
 				logger.Info("Circuit breaker '%s' state changed from %s to %s", name, from, to)
 			}
@@ -52,7 +53,7 @@ func NewCircuitBreakerEngine(engine LotteryDrawer, config *CircuitBreakerConfig,
 }
 
 // executeWithBreaker 使用熔断器执行操作
-func (c *CircuitBreakerEngine) executeWithBreaker(operation func() (interface{}, error)) (interface{}, error) {
+func (c *CircuitBreakerEngine) executeWithBreaker(operation func() (any, error)) (any, error) {
 	if c.breaker == nil {
 		// 熔断器未启用，直接执行
 		return operation()
@@ -74,7 +75,7 @@ func (c *CircuitBreakerEngine) executeWithBreaker(operation func() (interface{},
 
 // DrawInRange 在指定范围内抽奖
 func (c *CircuitBreakerEngine) DrawInRange(ctx context.Context, lockKey string, min, max int) (int, error) {
-	result, err := c.executeWithBreaker(func() (interface{}, error) {
+	result, err := c.executeWithBreaker(func() (any, error) {
 		return c.engine.DrawInRange(ctx, lockKey, min, max)
 	})
 	if err != nil {
@@ -86,7 +87,7 @@ func (c *CircuitBreakerEngine) DrawInRange(ctx context.Context, lockKey string, 
 
 // DrawMultipleInRange 在指定范围内进行多次抽奖
 func (c *CircuitBreakerEngine) DrawMultipleInRange(ctx context.Context, lockKey string, min, max, count int) ([]int, error) {
-	result, err := c.executeWithBreaker(func() (interface{}, error) {
+	result, err := c.executeWithBreaker(func() (any, error) {
 		return c.engine.DrawMultipleInRange(ctx, lockKey, min, max, count)
 	})
 	if err != nil {
@@ -98,7 +99,7 @@ func (c *CircuitBreakerEngine) DrawMultipleInRange(ctx context.Context, lockKey 
 
 // DrawFromPrizes 从奖品池中抽奖
 func (c *CircuitBreakerEngine) DrawFromPrizes(ctx context.Context, lockKey string, prizes []Prize) (*Prize, error) {
-	result, err := c.executeWithBreaker(func() (interface{}, error) {
+	result, err := c.executeWithBreaker(func() (any, error) {
 		return c.engine.DrawFromPrizes(ctx, lockKey, prizes)
 	})
 	if err != nil {
@@ -110,7 +111,7 @@ func (c *CircuitBreakerEngine) DrawFromPrizes(ctx context.Context, lockKey strin
 
 // DrawMultipleFromPrizes 从奖品池中进行多次抽奖
 func (c *CircuitBreakerEngine) DrawMultipleFromPrizes(ctx context.Context, lockKey string, prizes []Prize, count int) ([]*Prize, error) {
-	result, err := c.executeWithBreaker(func() (interface{}, error) {
+	result, err := c.executeWithBreaker(func() (any, error) {
 		return c.engine.DrawMultipleFromPrizes(ctx, lockKey, prizes, count)
 	})
 	if err != nil {
@@ -122,7 +123,7 @@ func (c *CircuitBreakerEngine) DrawMultipleFromPrizes(ctx context.Context, lockK
 
 // DrawMultipleInRangeWithRecovery 带恢复机制的多次范围抽奖
 func (c *CircuitBreakerEngine) DrawMultipleInRangeWithRecovery(ctx context.Context, lockKey string, min, max, count int) (*MultiDrawResult, error) {
-	result, err := c.executeWithBreaker(func() (interface{}, error) {
+	result, err := c.executeWithBreaker(func() (any, error) {
 		return c.engine.DrawMultipleInRangeWithRecovery(ctx, lockKey, min, max, count)
 	})
 	if err != nil {
@@ -134,7 +135,7 @@ func (c *CircuitBreakerEngine) DrawMultipleInRangeWithRecovery(ctx context.Conte
 
 // DrawMultipleFromPrizesWithRecovery 带恢复机制的多次奖品抽奖
 func (c *CircuitBreakerEngine) DrawMultipleFromPrizesWithRecovery(ctx context.Context, lockKey string, prizes []Prize, count int) (*MultiDrawResult, error) {
-	result, err := c.executeWithBreaker(func() (interface{}, error) {
+	result, err := c.executeWithBreaker(func() (any, error) {
 		return c.engine.DrawMultipleFromPrizesWithRecovery(ctx, lockKey, prizes, count)
 	})
 	if err != nil {
@@ -146,7 +147,7 @@ func (c *CircuitBreakerEngine) DrawMultipleFromPrizesWithRecovery(ctx context.Co
 
 // ResumeMultiDrawInRange 恢复多次范围抽奖
 func (c *CircuitBreakerEngine) ResumeMultiDrawInRange(ctx context.Context, lockKey string, min, max, count int) (*MultiDrawResult, error) {
-	result, err := c.executeWithBreaker(func() (interface{}, error) {
+	result, err := c.executeWithBreaker(func() (any, error) {
 		return c.engine.ResumeMultiDrawInRange(ctx, lockKey, min, max, count)
 	})
 	if err != nil {
@@ -158,7 +159,7 @@ func (c *CircuitBreakerEngine) ResumeMultiDrawInRange(ctx context.Context, lockK
 
 // ResumeMultiDrawFromPrizes 恢复多次奖品抽奖
 func (c *CircuitBreakerEngine) ResumeMultiDrawFromPrizes(ctx context.Context, lockKey string, prizes []Prize, count int) (*MultiDrawResult, error) {
-	result, err := c.executeWithBreaker(func() (interface{}, error) {
+	result, err := c.executeWithBreaker(func() (any, error) {
 		return c.engine.ResumeMultiDrawFromPrizes(ctx, lockKey, prizes, count)
 	})
 	if err != nil {
@@ -170,7 +171,7 @@ func (c *CircuitBreakerEngine) ResumeMultiDrawFromPrizes(ctx context.Context, lo
 
 // RollbackMultiDraw 回滚多次抽奖
 func (c *CircuitBreakerEngine) RollbackMultiDraw(ctx context.Context, drawState *DrawState) error {
-	_, err := c.executeWithBreaker(func() (interface{}, error) {
+	_, err := c.executeWithBreaker(func() (any, error) {
 		return nil, c.engine.RollbackMultiDraw(ctx, drawState)
 	})
 
@@ -179,7 +180,7 @@ func (c *CircuitBreakerEngine) RollbackMultiDraw(ctx context.Context, drawState 
 
 // SaveDrawState 保存抽奖状态
 func (c *CircuitBreakerEngine) SaveDrawState(ctx context.Context, drawState *DrawState) error {
-	_, err := c.executeWithBreaker(func() (interface{}, error) {
+	_, err := c.executeWithBreaker(func() (any, error) {
 		return nil, c.engine.SaveDrawState(ctx, drawState)
 	})
 
@@ -188,7 +189,7 @@ func (c *CircuitBreakerEngine) SaveDrawState(ctx context.Context, drawState *Dra
 
 // LoadDrawState 加载抽奖状态
 func (c *CircuitBreakerEngine) LoadDrawState(ctx context.Context, lockKey string) (*DrawState, error) {
-	result, err := c.executeWithBreaker(func() (interface{}, error) {
+	result, err := c.executeWithBreaker(func() (any, error) {
 		return c.engine.LoadDrawState(ctx, lockKey)
 	})
 	if err != nil {
@@ -204,7 +205,7 @@ func (c *CircuitBreakerEngine) LoadDrawState(ctx context.Context, lockKey string
 
 // DrawMultipleInRangeOptimized 优化的多次范围抽奖
 func (c *CircuitBreakerEngine) DrawMultipleInRangeOptimized(ctx context.Context, lockKey string, min, max, count int, progressCallback ProgressCallback) (*MultiDrawResult, error) {
-	result, err := c.executeWithBreaker(func() (interface{}, error) {
+	result, err := c.executeWithBreaker(func() (any, error) {
 		return c.engine.DrawMultipleInRangeOptimized(ctx, lockKey, min, max, count, progressCallback)
 	})
 	if err != nil {
@@ -216,7 +217,7 @@ func (c *CircuitBreakerEngine) DrawMultipleInRangeOptimized(ctx context.Context,
 
 // DrawMultipleFromPrizesOptimized 优化的多次奖品抽奖
 func (c *CircuitBreakerEngine) DrawMultipleFromPrizesOptimized(ctx context.Context, lockKey string, prizes []Prize, count int, progressCallback ProgressCallback) (*MultiDrawResult, error) {
-	result, err := c.executeWithBreaker(func() (interface{}, error) {
+	result, err := c.executeWithBreaker(func() (any, error) {
 		return c.engine.DrawMultipleFromPrizesOptimized(ctx, lockKey, prizes, count, progressCallback)
 	})
 	if err != nil {
@@ -266,7 +267,7 @@ func (c *CircuitBreakerEngine) ResetCircuitBreaker() {
 				failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
 				return counts.Requests >= c.config.MinRequests && failureRatio >= c.config.FailureRatio
 			},
-			OnStateChange: func(name string, from gobreaker.State, to gobreaker.State) {
+			OnStateChange: func(name string, from, to gobreaker.State) {
 				if c.config.OnStateChange && c.logger != nil {
 					c.logger.Info("Circuit breaker '%s' state changed from %s to %s", name, from, to)
 				}
@@ -291,8 +292,8 @@ func NewCircuitBreakerHealthCheck(engine *CircuitBreakerEngine) *CircuitBreakerH
 }
 
 // Check 执行健康检查
-func (h *CircuitBreakerHealthCheck) Check() map[string]interface{} {
-	result := map[string]interface{}{
+func (h *CircuitBreakerHealthCheck) Check() map[string]any {
+	result := map[string]any{
 		"circuit_breaker_enabled": h.engine.config.Enabled,
 	}
 
@@ -318,9 +319,10 @@ func (h *CircuitBreakerHealthCheck) Check() map[string]interface{} {
 
 		// 健康状态判断
 		healthy := true
-		if state == "open" {
+		switch state {
+		case "open":
 			healthy = false
-		} else if state == "half-open" {
+		case "half-open":
 			// 半开状态下，如果连续失败次数过多，认为不健康
 			if counts.ConsecutiveFailures > 2 {
 				healthy = false
@@ -349,8 +351,8 @@ func NewCircuitBreakerMetrics(engine *CircuitBreakerEngine) *CircuitBreakerMetri
 }
 
 // CollectMetrics 收集指标
-func (m *CircuitBreakerMetrics) CollectMetrics() map[string]interface{} {
-	metrics := map[string]interface{}{
+func (m *CircuitBreakerMetrics) CollectMetrics() map[string]any {
+	metrics := map[string]any{
 		"circuit_breaker_enabled": m.engine.config.Enabled,
 		"timestamp":               time.Now().Unix(),
 	}

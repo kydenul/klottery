@@ -34,6 +34,7 @@ type DistributedLockManager struct {
 	lockTimeout   time.Duration
 	retryAttempts int
 	retryInterval time.Duration
+	lockCacheTTL  time.Duration // 锁缓存TTL
 
 	performanceMonitor *PerformanceMonitor
 }
@@ -45,30 +46,39 @@ func NewLockManager(redisClient *redis.Client, lockTimeout time.Duration) *Distr
 		lockTimeout:   lockTimeout,
 		retryAttempts: DefaultRetryAttempts,
 		retryInterval: DefaultRetryInterval,
+		lockCacheTTL:  DefaultLockCacheTTL,
 
 		performanceMonitor: NewPerformanceMonitor(),
 	}
 }
 
 // NewLockManagerWithRetry creates a new distributed lock manager with custom retry settings
-func NewLockManagerWithRetry(redisClient *redis.Client, lockTimeout time.Duration, retryAttempts int, retryInterval time.Duration) *DistributedLockManager {
+func NewLockManagerWithRetry(
+	redisClient *redis.Client,
+	lockTimeout time.Duration, retryAttempts int, retryInterval, lockCacheTTL time.Duration,
+) *DistributedLockManager {
 	return &DistributedLockManager{
 		redisClient:   redisClient,
 		lockTimeout:   lockTimeout,
 		retryAttempts: retryAttempts,
 		retryInterval: retryInterval,
+		lockCacheTTL:  lockCacheTTL,
 
 		performanceMonitor: NewPerformanceMonitor(),
 	}
 }
 
 // NewBatchDistributedLockManager creates a new batch lock manager
-func NewBatchLockManager(redisClient *redis.Client, lockTimeout time.Duration, retryAttempts int, retryInterval time.Duration) *DistributedLockManager {
+func NewBatchLockManager(
+	redisClient *redis.Client,
+	lockTimeout time.Duration, retryAttempts int, retryInterval, lockCacheTTL time.Duration,
+) *DistributedLockManager {
 	return &DistributedLockManager{
 		redisClient:   redisClient,
 		lockTimeout:   lockTimeout,
 		retryAttempts: retryAttempts,
 		retryInterval: retryInterval,
+		lockCacheTTL:  lockCacheTTL,
 
 		performanceMonitor: NewPerformanceMonitor(),
 	}

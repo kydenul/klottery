@@ -1,13 +1,12 @@
 # 开发环境配置
 # 用于本地开发和测试
 
-# 服务器配置
-server:
-  host: "localhost"
-  port: 8080
-  read_timeout: "10s"
-  write_timeout: "10s"
-  idle_timeout: "60s"
+# 抽奖引擎配置
+lottery:
+  lock_timeout: "10s"
+  retry_attempts: 2
+  retry_interval: "50ms"
+  lock_cache_ttl: "1s"
 
 # Redis 配置
 redis:
@@ -23,52 +22,6 @@ redis:
   pool_timeout: "3s"
   cluster_mode: false
   tls_enabled: false
-
-# 抽奖引擎配置
-lottery:
-  lock_timeout: "10s"
-  retry_attempts: 2
-  retry_interval: "50ms"
-  state_ttl: "30m"
-  max_serialization_mb: 5
-  state_cleanup_interval: "30m"
-  batch_size: 50
-  concurrency_limit: 100
-  cache_enabled: true
-  cache_ttl: "2m"
-  cache_max_size: 1000
-  rate_limit_enabled: false
-
-# 安全配置 (开发环境关闭大部分安全功能)
-security:
-  enable_auth: false
-  enable_encryption: false
-  enable_ip_whitelist: false
-  enable_cors: true
-  cors_origins: ["http://localhost:3000", "http://localhost:8080"]
-  enable_audit: false
-
-# 监控配置
-monitoring:
-  enable_metrics: true
-  metrics_addr: ":9090"
-  metrics_path: "/metrics"
-  enable_health_check: true
-  health_check_addr: ":8081"
-  health_check_path: "/health"
-  health_check_interval: "10s"
-  enable_tracing: false
-  enable_alerting: false
-
-# 日志配置 (开发环境使用控制台输出)
-logging:
-  level: "debug"
-  format: "console"
-  output: "stdout"
-  max_size: 10
-  max_backups: 1
-  max_age: 7
-  compress: false
 
 # 熔断器配置 (开发环境更宽松)
 circuit_breaker:

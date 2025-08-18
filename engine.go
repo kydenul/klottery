@@ -10,121 +10,108 @@ import (
 
 // LotteryEngine provides thread-safe lottery functionality
 type LotteryEngine struct {
-	redisClient *redis.Client
-	lockManager *DistributedLockManager
-	config      *LotteryConfig
-	logger      Logger
-	mu          sync.RWMutex // 保护配置和lockManager的并发访问
+	redisClient   *redis.Client
+	lockManager   *DistributedLockManager
+	configManager *ConfigManager
+	logger        Logger
+	mu            sync.RWMutex // 保护配置和lockManager的并发访问
 
 	performanceMonitor *PerformanceMonitor
-	lockCache          sync.Map      // 锁缓存，用于快速路径优化
-	lockCacheTTL       time.Duration // 锁缓存TTL
+	lockCache          sync.Map // 锁缓存，用于快速路径优化
 }
 
 // NewLotteryEngine creates a new lottery engine with the given Redis client
 func NewLotteryEngine(redisClient *redis.Client) *LotteryEngine {
-	config := &LotteryConfig{
-		LockTimeout:   30 * time.Second,
-		RetryAttempts: 3,
-		RetryInterval: 100 * time.Millisecond,
-	}
+	cm := NewDefaultConfigManager()
 
 	return &LotteryEngine{
 		redisClient: redisClient,
 		lockManager: NewLockManagerWithRetry(
 			redisClient,
-			config.LockTimeout,
-			config.RetryAttempts,
-			config.RetryInterval,
+			cm.config.Engine.LockTimeout,
+			cm.config.Engine.RetryAttempts,
+			cm.config.Engine.RetryInterval,
+			cm.config.Engine.LockCacheTTL,
 		),
-		config: config,
-		logger: &DefaultLogger{},
+		configManager: cm,
+		logger:        &DefaultLogger{},
 
 		performanceMonitor: NewPerformanceMonitor(),
-		lockCacheTTL:       1 * time.Second, // 1秒的锁缓存TTL
 	}
 }
 
 // NewLotteryEngineWithConfig creates a new lottery engine with custom configuration
-func NewLotteryEngineWithConfig(redisClient *redis.Client, config *LotteryConfig) *LotteryEngine {
+func NewLotteryEngineWithConfig(redisClient *redis.Client, cm *ConfigManager) *LotteryEngine {
 	return &LotteryEngine{
 		redisClient: redisClient,
 		lockManager: NewLockManagerWithRetry(
 			redisClient,
-			config.LockTimeout,
-			config.RetryAttempts,
-			config.RetryInterval,
+			cm.config.Engine.LockTimeout,
+			cm.config.Engine.RetryAttempts,
+			cm.config.Engine.RetryInterval,
+			cm.config.Engine.LockCacheTTL,
 		),
-		config: config,
-		logger: &DefaultLogger{},
+		configManager: cm,
+		logger:        &DefaultLogger{},
 
 		performanceMonitor: NewPerformanceMonitor(),
-		lockCacheTTL:       1 * time.Second, // 1秒的锁缓存TTL
 	}
 }
 
 // NewLotteryEngineWithLogger creates a new lottery engine with custom logger
 func NewLotteryEngineWithLogger(redisClient *redis.Client, logger Logger) *LotteryEngine {
-	config := &LotteryConfig{
-		LockTimeout:   30 * time.Second,
-		RetryAttempts: 3,
-		RetryInterval: 100 * time.Millisecond,
-	}
+	cm := NewDefaultConfigManager()
 
 	lockManager := NewLockManagerWithRetry(
 		redisClient,
-		config.LockTimeout,
-		config.RetryAttempts,
-		config.RetryInterval,
+		cm.config.Engine.LockTimeout,
+		cm.config.Engine.RetryAttempts,
+		cm.config.Engine.RetryInterval,
+		cm.config.Engine.LockCacheTTL,
 	)
 
 	return &LotteryEngine{
-		redisClient: redisClient,
-		lockManager: lockManager,
-		config:      config,
-		logger:      logger,
+		redisClient:   redisClient,
+		lockManager:   lockManager,
+		configManager: cm,
+		logger:        logger,
 
 		performanceMonitor: NewPerformanceMonitor(),
-		lockCacheTTL:       1 * time.Second, // 1秒的锁缓存TTL
 	}
 }
 
 // NewLotteryEngineWithConfigAndLogger creates a new lottery engine with custom configuration and logger
 func NewLotteryEngineWithConfigAndLogger(
-	redisClient *redis.Client, config *LotteryConfig, logger Logger,
+	redisClient *redis.Client, config *ConfigManager, logger Logger,
 ) *LotteryEngine {
 	lockManager := NewLockManagerWithRetry(
 		redisClient,
-		config.LockTimeout,
-		config.RetryAttempts,
-		config.RetryInterval,
+		config.config.Engine.LockTimeout,
+		config.config.Engine.RetryAttempts,
+		config.config.Engine.RetryInterval,
+		config.config.Engine.LockCacheTTL,
 	)
 
 	return &LotteryEngine{
-		redisClient: redisClient,
-		lockManager: lockManager,
-		config:      config,
-		logger:      logger,
+		redisClient:   redisClient,
+		lockManager:   lockManager,
+		configManager: config,
+		logger:        logger,
 
 		performanceMonitor: NewPerformanceMonitor(),
-		lockCacheTTL:       1 * time.Second, // 1秒的锁缓存TTL
 	}
 }
 
 // GetConfig returns a copy of the current lottery engine configuration
-func (e *LotteryEngine) GetConfig() *LotteryConfig {
+func (e *LotteryEngine) GetConfig() *Config {
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 
-	return &LotteryConfig{
-		LockTimeout:   e.config.LockTimeout,
-		RetryAttempts: e.config.RetryAttempts,
-		RetryInterval: e.config.RetryInterval,
-	}
+	return e.configManager.config
 }
 
 // UpdateConfig updates the lottery engine configuration at runtime
-func (e *LotteryEngine) UpdateConfig(newConfig *LotteryConfig) error {
+func (e *LotteryEngine) UpdateConfig(newConfig *Config) error {
 	e.logger.Debug("UpdateConfig called")
 
 	if newConfig == nil {
@@ -142,22 +129,23 @@ func (e *LotteryEngine) UpdateConfig(newConfig *LotteryConfig) error {
 	defer e.mu.Unlock()
 
 	// Update the engine configuration
-	e.config = &LotteryConfig{
-		LockTimeout:   newConfig.LockTimeout,
-		RetryAttempts: newConfig.RetryAttempts,
-		RetryInterval: newConfig.RetryInterval,
-	}
+	e.configManager.config = newConfig
 
 	// Update the lock manager with new configuration
 	e.lockManager = NewLockManagerWithRetry(
 		e.redisClient,
-		e.config.LockTimeout,
-		e.config.RetryAttempts,
-		e.config.RetryInterval,
+		e.configManager.config.Engine.LockTimeout,
+		e.configManager.config.Engine.RetryAttempts,
+		e.configManager.config.Engine.RetryInterval,
+		e.configManager.config.Engine.LockCacheTTL,
 	)
 
-	e.logger.Info("Configuration updated successfully: LockTimeout=%v, RetryAttempts=%d, RetryInterval=%v",
-		e.config.LockTimeout, e.config.RetryAttempts, e.config.RetryInterval)
+	e.logger.Info(
+		"Configuration updated successfully: LockTimeout=%v, RetryAttempts=%d, RetryInterval=%v, LockCacheTTL=%v",
+		e.configManager.config.Engine.LockTimeout,
+		e.configManager.config.Engine.RetryAttempts,
+		e.configManager.config.Engine.RetryInterval,
+		e.configManager.config.Engine.LockCacheTTL)
 	return nil
 }
 
@@ -173,12 +161,13 @@ func (e *LotteryEngine) SetLockTimeout(timeout time.Duration) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	e.config.LockTimeout = timeout
+	e.configManager.config.Engine.LockTimeout = timeout
 	e.lockManager = NewLockManagerWithRetry(
 		e.redisClient,
-		e.config.LockTimeout,
-		e.config.RetryAttempts,
-		e.config.RetryInterval,
+		e.configManager.config.Engine.LockTimeout,
+		e.configManager.config.Engine.RetryAttempts,
+		e.configManager.config.Engine.RetryInterval,
+		e.configManager.config.Engine.LockCacheTTL,
 	)
 
 	e.logger.Info("Lock timeout updated to %v", timeout)
@@ -197,12 +186,13 @@ func (e *LotteryEngine) SetRetryAttempts(attempts int) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	e.config.RetryAttempts = attempts
+	e.configManager.config.Engine.RetryAttempts = attempts
 	e.lockManager = NewLockManagerWithRetry(
 		e.redisClient,
-		e.config.LockTimeout,
-		e.config.RetryAttempts,
-		e.config.RetryInterval,
+		e.configManager.config.Engine.LockTimeout,
+		e.configManager.config.Engine.RetryAttempts,
+		e.configManager.config.Engine.RetryInterval,
+		e.configManager.config.Engine.LockCacheTTL,
 	)
 
 	e.logger.Info("Retry attempts updated to %d", attempts)
@@ -221,12 +211,13 @@ func (e *LotteryEngine) SetRetryInterval(interval time.Duration) error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	e.config.RetryInterval = interval
+	e.configManager.config.Engine.RetryInterval = interval
 	e.lockManager = NewLockManagerWithRetry(
 		e.redisClient,
-		e.config.LockTimeout,
-		e.config.RetryAttempts,
-		e.config.RetryInterval,
+		e.configManager.config.Engine.LockTimeout,
+		e.configManager.config.Engine.RetryAttempts,
+		e.configManager.config.Engine.RetryInterval,
+		e.configManager.config.Engine.LockCacheTTL,
 	)
 
 	e.logger.Info("Retry interval updated to %v", interval)
@@ -391,7 +382,7 @@ func (e *LotteryEngine) LoadDrawState(ctx context.Context, lockKey string) (*Dra
 
 	// Find the most recent state key (based on operation ID timestamp)
 	var mostRecentKey string
-	var mostRecentTime string
+	var mostRecentOperationID string
 	for _, key := range stateKeys {
 		_, operationID, parseErr := parseStateKey(key)
 		if parseErr != nil {
@@ -399,13 +390,9 @@ func (e *LotteryEngine) LoadDrawState(ctx context.Context, lockKey string) (*Dra
 			continue
 		}
 
-		// Extract timestamp from operation ID (format: YYYYMMDD_HHMMSS_randomhex)
-		if len(operationID) >= 15 { // At least YYYYMMDD_HHMMSS
-			timestamp := operationID[:15] // YYYYMMDD_HHMMSS
-			if mostRecentTime == "" || timestamp > mostRecentTime {
-				mostRecentTime = timestamp
-				mostRecentKey = key
-			}
+		if mostRecentOperationID == "" || operationID > mostRecentOperationID {
+			mostRecentOperationID = operationID
+			mostRecentKey = key
 		}
 	}
 
@@ -713,23 +700,6 @@ func (e *LotteryEngine) DrawMultipleInRangeOptimized(
 	e.logger.Info(
 		"DrawMultipleInRangeOptimized successful: lockKey=%s, count=%d", lockKey, result.Completed)
 	return result, nil
-}
-
-// calculateOptimalBatchSize determines the optimal batch size based on the total count
-func calculateOptimalBatchSize(totalCount int) int {
-	// Use a heuristic to determine batch size
-	// For small counts, use smaller batches to reduce memory usage
-	// For large counts, use larger batches to improve performance
-
-	if totalCount <= 10 {
-		return 1 // No batching for very small counts
-	} else if totalCount <= 100 {
-		return 10 // Small batches for moderate counts
-	} else if totalCount <= 1000 {
-		return 50 // Medium batches for large counts
-	} else {
-		return 100 // Large batches for very large counts
-	}
 }
 
 // DrawInRange draws a random number within the specified range using distributed lock
@@ -1298,7 +1268,7 @@ func (e *LotteryEngine) DrawInRangeOptimized(ctx context.Context, lockKey string
 
 	// 检查锁缓存（快速路径）
 	if cachedTime, exists := e.lockCache.Load(lockKey); exists {
-		if time.Since(cachedTime.(time.Time)) < e.lockCacheTTL {
+		if time.Since(cachedTime.(time.Time)) < e.configManager.config.Engine.LockCacheTTL {
 			// 锁仍在缓存中，直接返回失败
 			duration := time.Since(startTime)
 			e.performanceMonitor.RecordDraw(false, duration)
@@ -1338,7 +1308,7 @@ func (e *LotteryEngine) DrawFromPrizesOptimized(ctx context.Context, lockKey str
 
 	// 检查锁缓存（快速路径）
 	if cachedTime, exists := e.lockCache.Load(lockKey); exists {
-		if time.Since(cachedTime.(time.Time)) < e.lockCacheTTL {
+		if time.Since(cachedTime.(time.Time)) < e.configManager.config.Engine.LockCacheTTL {
 			// 锁仍在缓存中，直接返回失败
 			duration := time.Since(startTime)
 			e.performanceMonitor.RecordDraw(false, duration)
@@ -1410,7 +1380,7 @@ func (e *LotteryEngine) DrawMultipleFromPrizesOptimized(
 	}
 
 	// Create distributed lock manager
-	lockManager := NewLockManager(e.redisClient, e.config.LockTimeout)
+	lockManager := NewLockManager(e.redisClient, e.configManager.config.Engine.LockTimeout)
 
 	// Create prize selector for optimized selection
 	selector := NewDefaultPrizeSelector()

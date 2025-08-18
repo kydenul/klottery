@@ -19,6 +19,9 @@ const (
 	// DefaultStateTTL is the default TTL for persisted state (1 hour)
 	DefaultStateTTL = 1 * time.Hour
 
+	// DefaultMaxSerializationMB is the maximum allowed size (10MB)
+	DefaultMaxSerializationMB = 10
+
 	// OperationIDLength is the length of the operation ID in bytes
 	OperationIDLength = 8
 
@@ -206,14 +209,14 @@ func deserializeDrawState(data []byte) (*DrawState, error) {
 
 // generateOperationID generates a unique operation ID using timestamp and random bytes
 func generateOperationID() string {
-	// Use current timestamp as prefix for time-based ordering
-	timestamp := time.Now().Format("20060102_150405")
+	// Use current timestamp with nanoseconds for time-based ordering
+	timestamp := time.Now().Format("20060102_150405.000000000")
 
 	// Generate random bytes for uniqueness
 	randomBytes := make([]byte, OperationIDLength)
 	if _, err := rand.Read(randomBytes); err != nil {
 		// Fallback to timestamp-based ID if random generation fails
-		return fmt.Sprintf("%s_%d", timestamp, time.Now().UnixNano()%1000000)
+		return fmt.Sprintf("%s_%d", timestamp, time.Now().UnixNano())
 	}
 
 	randomHex := hex.EncodeToString(randomBytes)

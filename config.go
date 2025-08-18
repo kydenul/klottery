@@ -6,40 +6,73 @@ import (
 	"time"
 
 	"github.com/fsnotify/fsnotify"
+	"github.com/go-redis/redis/v8"
 	"github.com/spf13/viper"
 )
 
 // Config 生产环境配置结构
 type Config struct {
-	// 服务配置
-	Server ServerConfig `mapstructure:"server"`
+	// Engine config
+	Engine *EngineConfig `mapstructure:"lottery"`
 
 	// Redis 配置
-	Redis RedisConfig `mapstructure:"redis"`
-
-	// 抽奖引擎配置
-	Lottery LotteryEngineConfig `mapstructure:"lottery"`
-
-	// 安全配置
-	Security SecurityConfig `mapstructure:"security"`
-
-	// 监控配置
-	Monitoring MonitoringConfig `mapstructure:"monitoring"`
-
-	// 日志配置
-	Logging LoggingConfig `mapstructure:"logging"`
+	Redis *RedisConfig `mapstructure:"redis"`
 
 	// 熔断器配置
-	CircuitBreaker CircuitBreakerConfig `mapstructure:"circuit_breaker"`
+	CircuitBreaker *CircuitBreakerConfig `mapstructure:"circuit_breaker"`
 }
 
-// ServerConfig 服务器配置
-type ServerConfig struct {
-	Host         string        `mapstructure:"host"`
-	Port         int           `mapstructure:"port"`
-	ReadTimeout  time.Duration `mapstructure:"read_timeout"`
-	WriteTimeout time.Duration `mapstructure:"write_timeout"`
-	IdleTimeout  time.Duration `mapstructure:"idle_timeout"`
+func (c *Config) Validate() error {
+	// 验证锁配置
+	if c.Engine.LockTimeout < MinLockTimeout || c.Engine.LockTimeout > MaxLockTimeout {
+		return ErrInvalidLockTimeout
+	}
+	if c.Engine.RetryAttempts < 0 || c.Engine.RetryAttempts > MaxRetryAttempts {
+		return ErrInvalidRetryAttempts
+	}
+	if c.Engine.RetryInterval < 0 {
+		return ErrInvalidRetryInterval
+	}
+	if c.Engine.LockCacheTTL < MinLockCacheTTL || c.Engine.LockCacheTTL > MaxLockCacheTTL {
+		return ErrInvalidLockCacheTTL
+	}
+
+	// 验证 Redis 配置
+	if c.Redis.Addr == "" {
+		return fmt.Errorf("redis address is required")
+	}
+	if c.Redis.PoolSize <= 0 {
+		return fmt.Errorf("redis pool size must be positive")
+	}
+
+	return nil
+}
+
+type EngineConfig struct {
+	LockTimeout   time.Duration `mapstructure:"lock_timeout"`
+	RetryAttempts int           `mapstructure:"retry_attempts"`
+	RetryInterval time.Duration `mapstructure:"retry_interval"`
+	LockCacheTTL  time.Duration `mapstructure:"lock_cache_ttl"`
+}
+
+func DefaultLotteryConfig() *EngineConfig {
+	return &EngineConfig{
+		LockTimeout:   DefaultLockTimeout,
+		RetryAttempts: DefaultRetryAttempts,
+		RetryInterval: DefaultRetryInterval,
+		LockCacheTTL:  DefaultLockCacheTTL,
+	}
+}
+
+func NewEngineConfig(
+	lockTimeout time.Duration, attempts int, interval, cacheTTL time.Duration,
+) *EngineConfig {
+	return &EngineConfig{
+		LockTimeout:   lockTimeout,
+		RetryAttempts: attempts,
+		RetryInterval: interval,
+		LockCacheTTL:  cacheTTL,
+	}
 }
 
 // RedisConfig Redis 配置
@@ -71,105 +104,6 @@ type RedisConfig struct {
 	CAFile     string `mapstructure:"ca_file"`
 }
 
-// LotteryEngineConfig 抽奖引擎配置
-type LotteryEngineConfig struct {
-	// 锁配置
-	LockTimeout   time.Duration `mapstructure:"lock_timeout"`
-	RetryAttempts int           `mapstructure:"retry_attempts"`
-	RetryInterval time.Duration `mapstructure:"retry_interval"`
-
-	// 状态持久化配置
-	StateTTL             time.Duration `mapstructure:"state_ttl"`
-	MaxSerializationMB   int           `mapstructure:"max_serialization_mb"`
-	StateCleanupInterval time.Duration `mapstructure:"state_cleanup_interval"`
-
-	// 性能配置
-	BatchSize        int           `mapstructure:"batch_size"`
-	ConcurrencyLimit int           `mapstructure:"concurrency_limit"`
-	CacheEnabled     bool          `mapstructure:"cache_enabled"`
-	CacheTTL         time.Duration `mapstructure:"cache_ttl"`
-	CacheMaxSize     int           `mapstructure:"cache_max_size"`
-
-	// 限流配置
-	RateLimitEnabled bool    `mapstructure:"rate_limit_enabled"`
-	RateLimitRPS     float64 `mapstructure:"rate_limit_rps"`
-	RateLimitBurst   int     `mapstructure:"rate_limit_burst"`
-}
-
-// SecurityConfig 安全配置
-type SecurityConfig struct {
-	// 认证配置
-	EnableAuth    bool          `mapstructure:"enable_auth"`
-	JWTSecret     string        `mapstructure:"jwt_secret"`
-	TokenExpiry   time.Duration `mapstructure:"token_expiry"`
-	RefreshExpiry time.Duration `mapstructure:"refresh_expiry"`
-
-	// 加密配置
-	EnableEncryption bool   `mapstructure:"enable_encryption"`
-	EncryptionKey    string `mapstructure:"encryption_key"`
-	EncryptionAlgo   string `mapstructure:"encryption_algo"`
-
-	// 访问控制
-	EnableIPWhitelist bool     `mapstructure:"enable_ip_whitelist"`
-	IPWhitelist       []string `mapstructure:"ip_whitelist"`
-	EnableCORS        bool     `mapstructure:"enable_cors"`
-	CORSOrigins       []string `mapstructure:"cors_origins"`
-
-	// 审计配置
-	EnableAudit    bool   `mapstructure:"enable_audit"`
-	AuditLogPath   string `mapstructure:"audit_log_path"`
-	AuditLogLevel  string `mapstructure:"audit_log_level"`
-	AuditRetention int    `mapstructure:"audit_retention_days"`
-}
-
-// MonitoringConfig 监控配置
-type MonitoringConfig struct {
-	// Prometheus 配置
-	EnableMetrics bool   `mapstructure:"enable_metrics"`
-	MetricsAddr   string `mapstructure:"metrics_addr"`
-	MetricsPath   string `mapstructure:"metrics_path"`
-
-	// 健康检查配置
-	EnableHealthCheck   bool          `mapstructure:"enable_health_check"`
-	HealthCheckAddr     string        `mapstructure:"health_check_addr"`
-	HealthCheckPath     string        `mapstructure:"health_check_path"`
-	HealthCheckInterval time.Duration `mapstructure:"health_check_interval"`
-
-	// 链路追踪配置
-	EnableTracing   bool    `mapstructure:"enable_tracing"`
-	TracingEndpoint string  `mapstructure:"tracing_endpoint"`
-	TracingSampler  float64 `mapstructure:"tracing_sampler"`
-	ServiceName     string  `mapstructure:"service_name"`
-
-	// 告警配置
-	EnableAlerting   bool        `mapstructure:"enable_alerting"`
-	AlertingWebhooks []string    `mapstructure:"alerting_webhooks"`
-	AlertingRules    []AlertRule `mapstructure:"alerting_rules"`
-}
-
-// AlertRule 告警规则
-type AlertRule struct {
-	Name        string        `mapstructure:"name"`
-	Metric      string        `mapstructure:"metric"`
-	Threshold   float64       `mapstructure:"threshold"`
-	Operator    string        `mapstructure:"operator"` // >, <, >=, <=, ==, !=
-	Duration    time.Duration `mapstructure:"duration"`
-	Severity    string        `mapstructure:"severity"` // critical, warning, info
-	Description string        `mapstructure:"description"`
-}
-
-// LoggingConfig 日志配置
-type LoggingConfig struct {
-	Level      string `mapstructure:"level"`       // debug, info, warn, error
-	Format     string `mapstructure:"format"`      // json, console
-	Output     string `mapstructure:"output"`      // stdout, stderr, file
-	FilePath   string `mapstructure:"file_path"`   // 日志文件路径
-	MaxSize    int    `mapstructure:"max_size"`    // MB
-	MaxBackups int    `mapstructure:"max_backups"` // 保留文件数
-	MaxAge     int    `mapstructure:"max_age"`     // 保留天数
-	Compress   bool   `mapstructure:"compress"`    // 是否压缩
-}
-
 // CircuitBreakerConfig 熔断器配置
 type CircuitBreakerConfig struct {
 	Enabled       bool          `mapstructure:"enabled"`
@@ -180,6 +114,20 @@ type CircuitBreakerConfig struct {
 	FailureRatio  float64       `mapstructure:"failure_ratio"`
 	MinRequests   uint32        `mapstructure:"min_requests"`
 	OnStateChange bool          `mapstructure:"on_state_change"`
+}
+
+// DefaultCircuitBreakerConfig 返回默认熔断器配置
+func DefaultCircuitBreakerConfig() *CircuitBreakerConfig {
+	return &CircuitBreakerConfig{
+		Enabled:       true,
+		Name:          DefaultCircuitBreakerName,
+		MaxRequests:   DefaultCircuitBreakerMaxRequests,
+		Interval:      DefaultCircuitBreakerInterval,
+		Timeout:       DefaultCircuitBreakerTimeout,
+		FailureRatio:  DefaultCircuitBreakerFailureRatio,
+		MinRequests:   DefaultCircuitBreakerMinRequests,
+		OnStateChange: DefaultCircuitBreakerOnStateChange,
+	}
 }
 
 // ConfigManager 配置管理器
@@ -240,12 +188,10 @@ func (cm *ConfigManager) LoadConfig() (*Config, error) {
 
 // setDefaults 设置默认配置值
 func (cm *ConfigManager) setDefaults() {
-	// 服务器默认配置
-	cm.viper.SetDefault("server.host", "0.0.0.0")
-	cm.viper.SetDefault("server.port", 8080)
-	cm.viper.SetDefault("server.read_timeout", "30s")
-	cm.viper.SetDefault("server.write_timeout", "30s")
-	cm.viper.SetDefault("server.idle_timeout", "120s")
+	// 抽奖引擎默认配置
+	cm.viper.SetDefault("lottery.lock_timeout", "30s")
+	cm.viper.SetDefault("lottery.retry_attempts", 3)
+	cm.viper.SetDefault("lottery.retry_interval", "100ms")
 
 	// Redis 默认配置
 	cm.viper.SetDefault("redis.addr", "localhost:6379")
@@ -261,56 +207,6 @@ func (cm *ConfigManager) setDefaults() {
 	cm.viper.SetDefault("redis.cluster_mode", false)
 	cm.viper.SetDefault("redis.tls_enabled", false)
 
-	// 抽奖引擎默认配置
-	cm.viper.SetDefault("lottery.lock_timeout", "30s")
-	cm.viper.SetDefault("lottery.retry_attempts", 3)
-	cm.viper.SetDefault("lottery.retry_interval", "100ms")
-	cm.viper.SetDefault("lottery.state_ttl", "1h")
-	cm.viper.SetDefault("lottery.max_serialization_mb", 10)
-	cm.viper.SetDefault("lottery.state_cleanup_interval", "1h")
-	cm.viper.SetDefault("lottery.batch_size", 100)
-	cm.viper.SetDefault("lottery.concurrency_limit", 1000)
-	cm.viper.SetDefault("lottery.cache_enabled", true)
-	cm.viper.SetDefault("lottery.cache_ttl", "5m")
-	cm.viper.SetDefault("lottery.cache_max_size", 10000)
-	cm.viper.SetDefault("lottery.rate_limit_enabled", false)
-	cm.viper.SetDefault("lottery.rate_limit_rps", 1000.0)
-	cm.viper.SetDefault("lottery.rate_limit_burst", 100)
-
-	// 安全默认配置
-	cm.viper.SetDefault("security.enable_auth", false)
-	cm.viper.SetDefault("security.token_expiry", "24h")
-	cm.viper.SetDefault("security.refresh_expiry", "168h")
-	cm.viper.SetDefault("security.enable_encryption", false)
-	cm.viper.SetDefault("security.encryption_algo", "AES-256-GCM")
-	cm.viper.SetDefault("security.enable_ip_whitelist", false)
-	cm.viper.SetDefault("security.enable_cors", false)
-	cm.viper.SetDefault("security.enable_audit", false)
-	cm.viper.SetDefault("security.audit_log_level", "info")
-	cm.viper.SetDefault("security.audit_retention_days", 30)
-
-	// 监控默认配置
-	cm.viper.SetDefault("monitoring.enable_metrics", true)
-	cm.viper.SetDefault("monitoring.metrics_addr", ":9090")
-	cm.viper.SetDefault("monitoring.metrics_path", "/metrics")
-	cm.viper.SetDefault("monitoring.enable_health_check", true)
-	cm.viper.SetDefault("monitoring.health_check_addr", ":8081")
-	cm.viper.SetDefault("monitoring.health_check_path", "/health")
-	cm.viper.SetDefault("monitoring.health_check_interval", "30s")
-	cm.viper.SetDefault("monitoring.enable_tracing", false)
-	cm.viper.SetDefault("monitoring.tracing_sampler", 0.1)
-	cm.viper.SetDefault("monitoring.service_name", "lottery-service")
-	cm.viper.SetDefault("monitoring.enable_alerting", false)
-
-	// 日志默认配置
-	cm.viper.SetDefault("logging.level", "info")
-	cm.viper.SetDefault("logging.format", "json")
-	cm.viper.SetDefault("logging.output", "stdout")
-	cm.viper.SetDefault("logging.max_size", 100)
-	cm.viper.SetDefault("logging.max_backups", 3)
-	cm.viper.SetDefault("logging.max_age", 28)
-	cm.viper.SetDefault("logging.compress", true)
-
 	// 熔断器默认配置
 	cm.viper.SetDefault("circuit_breaker.enabled", true)
 	cm.viper.SetDefault("circuit_breaker.name", "lottery-engine")
@@ -323,49 +219,7 @@ func (cm *ConfigManager) setDefaults() {
 }
 
 // validateConfig 验证配置
-func (cm *ConfigManager) validateConfig(config *Config) error {
-	// 验证服务器配置
-	if config.Server.Port <= 0 || config.Server.Port > 65535 {
-		return fmt.Errorf("invalid server port: %d", config.Server.Port)
-	}
-
-	// 验证 Redis 配置
-	if config.Redis.Addr == "" {
-		return fmt.Errorf("redis address is required")
-	}
-	if config.Redis.PoolSize <= 0 {
-		return fmt.Errorf("redis pool size must be positive")
-	}
-
-	// 验证抽奖引擎配置
-	if config.Lottery.LockTimeout <= 0 {
-		return fmt.Errorf("lock timeout must be positive")
-	}
-	if config.Lottery.RetryAttempts < 0 {
-		return fmt.Errorf("retry attempts cannot be negative")
-	}
-	if config.Lottery.MaxSerializationMB <= 0 {
-		return fmt.Errorf("max serialization size must be positive")
-	}
-
-	// 验证安全配置
-	if config.Security.EnableAuth && config.Security.JWTSecret == "" {
-		return fmt.Errorf("JWT secret is required when auth is enabled")
-	}
-	if config.Security.EnableEncryption && config.Security.EncryptionKey == "" {
-		return fmt.Errorf("encryption key is required when encryption is enabled")
-	}
-
-	// 验证日志配置
-	validLogLevels := map[string]bool{
-		"debug": true, "info": true, "warn": true, "error": true,
-	}
-	if !validLogLevels[config.Logging.Level] {
-		return fmt.Errorf("invalid log level: %s", config.Logging.Level)
-	}
-
-	return nil
-}
+func (cm *ConfigManager) validateConfig(config *Config) error { return config.Validate() }
 
 // WatchConfig 监听配置变化
 func (cm *ConfigManager) WatchConfig(callback func(*Config)) error {
@@ -392,11 +246,123 @@ func (cm *ConfigManager) WatchConfig(callback func(*Config)) error {
 }
 
 // GetConfig 获取当前配置
-func (cm *ConfigManager) GetConfig() *Config {
-	return cm.config
-}
+func (cm *ConfigManager) GetConfig() *Config { return cm.config }
 
 // ReloadConfig 重新加载配置
-func (cm *ConfigManager) ReloadConfig() (*Config, error) {
-	return cm.LoadConfig()
+func (cm *ConfigManager) ReloadConfig() (*Config, error) { return cm.LoadConfig() }
+
+// DefaultRedisConfig 返回默认的Redis配置
+func DefaultRedisConfig() *RedisConfig {
+	return &RedisConfig{
+		Addr:         DefaultRedisAddr,
+		Password:     DefaultRedisPassword,
+		DB:           DefaultRedisDB,
+		PoolSize:     DefaultRedisPoolSize,
+		MinIdleConns: DefaultRedisMinIdleConns,
+		MaxRetries:   DefaultRedisMaxRetries,
+		DialTimeout:  DefaultRedisDialTimeout,
+		ReadTimeout:  DefaultRedisReadTimeout,
+		WriteTimeout: DefaultRedisWriteTimeout,
+		PoolTimeout:  DefaultRedisPoolTimeout,
+		ClusterMode:  DefaultRedisClusterMode,
+		TLSEnabled:   DefaultRedisTLSEnabled,
+	}
+}
+
+// NewRedisClient 创建 Redis 客户端, 使用默认配置
+func NewRedisClient() *redis.Client {
+	config := DefaultRedisConfig()
+	return redis.NewClient(&redis.Options{
+		Addr:         config.Addr,
+		Password:     config.Password,
+		DB:           config.DB,
+		PoolSize:     config.PoolSize,
+		MinIdleConns: config.MinIdleConns,
+		MaxRetries:   config.MaxRetries,
+		DialTimeout:  config.DialTimeout,
+		ReadTimeout:  config.ReadTimeout,
+		WriteTimeout: config.WriteTimeout,
+		PoolTimeout:  config.PoolTimeout,
+	})
+}
+
+// NewRedisClientFromConfig 从配置创建Redis客户端
+func NewRedisClientFromConfig(config *RedisConfig) *redis.Client {
+	if config == nil {
+		config = DefaultRedisConfig()
+	}
+
+	return redis.NewClient(&redis.Options{
+		Addr:         config.Addr,
+		Password:     config.Password,
+		DB:           config.DB,
+		PoolSize:     config.PoolSize,
+		MinIdleConns: config.MinIdleConns,
+		MaxRetries:   config.MaxRetries,
+		DialTimeout:  config.DialTimeout,
+		ReadTimeout:  config.ReadTimeout,
+		WriteTimeout: config.WriteTimeout,
+		PoolTimeout:  config.PoolTimeout,
+	})
+}
+
+// NewDefaultConfigManager 创建默认的抽奖配置
+func NewDefaultConfigManager() *ConfigManager {
+	cm := NewConfigManager()
+	cm.setDefaults()
+
+	// 创建默认配置结构
+	cm.config = &Config{
+		Engine:         DefaultLotteryConfig(),
+		Redis:          DefaultRedisConfig(),
+		CircuitBreaker: DefaultCircuitBreakerConfig(),
+	}
+	return cm
+}
+
+// NewLotteryConfig 创建自定义抽奖配置
+func NewLotteryConfig(
+	lockTimeout time.Duration, retryAttempts int, retryInterval, lockCacheTTL time.Duration,
+) (*ConfigManager, error) {
+	if lockTimeout <= 0 {
+		return nil, fmt.Errorf("lock timeout must be positive")
+	}
+	if retryAttempts < 0 {
+		return nil, fmt.Errorf("retry attempts cannot be negative")
+	}
+	if retryInterval < 0 {
+		return nil, fmt.Errorf("retry interval cannot be negative")
+	}
+
+	cm := NewConfigManager()
+	cm.setDefaults()
+
+	config := &Config{
+		Engine: &EngineConfig{
+			LockTimeout:   lockTimeout,
+			RetryAttempts: retryAttempts,
+			RetryInterval: retryInterval,
+			LockCacheTTL:  lockCacheTTL,
+		},
+		Redis:          DefaultRedisConfig(),
+		CircuitBreaker: DefaultCircuitBreakerConfig(),
+	}
+
+	cm.config = config
+	return cm, nil
+}
+
+// NewLotteryConfigFromConfig 从配置文件创建抽奖配置
+func NewLotteryConfigFromConfig(config *Config) (*ConfigManager, error) {
+	if config == nil {
+		return nil, fmt.Errorf("config cannot be nil")
+	}
+
+	if err := config.Validate(); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	cm := NewConfigManager()
+	cm.config = config
+	return cm, nil
 }

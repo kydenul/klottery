@@ -39,6 +39,7 @@ const (
 	ErrCodeInvalidRetryInterval ErrorCode = "LOTTERY_2012"
 	ErrCodeDrawInterrupted      ErrorCode = "LOTTERY_2013"
 	ErrCodePartialDrawFailure   ErrorCode = "LOTTERY_2014"
+	ErrCodeInvalidLockCacheTTL  ErrorCode = "LOTTERY_2015"
 
 	// 锁相关错误 (3000-3999)
 	ErrCodeLockAcquisitionFailed ErrorCode = "LOTTERY_3000"
@@ -81,18 +82,18 @@ const (
 
 // LotteryError 增强的错误类型
 type LotteryError struct {
-	Code       ErrorCode              `json:"code"`
-	Message    string                 `json:"message"`
-	Details    string                 `json:"details,omitempty"`
-	Severity   ErrorSeverity          `json:"severity"`
-	Timestamp  time.Time              `json:"timestamp"`
-	RequestID  string                 `json:"request_id,omitempty"`
-	UserID     string                 `json:"user_id,omitempty"`
-	Operation  string                 `json:"operation,omitempty"`
-	StackTrace string                 `json:"stack_trace,omitempty"`
-	Cause      error                  `json:"-"`
-	Retryable  bool                   `json:"retryable"`
-	Metadata   map[string]interface{} `json:"metadata,omitempty"`
+	Code       ErrorCode      `json:"code"`
+	Message    string         `json:"message"`
+	Details    string         `json:"details,omitempty"`
+	Severity   ErrorSeverity  `json:"severity"`
+	Timestamp  time.Time      `json:"timestamp"`
+	RequestID  string         `json:"request_id,omitempty"`
+	UserID     string         `json:"user_id,omitempty"`
+	Operation  string         `json:"operation,omitempty"`
+	StackTrace string         `json:"stack_trace,omitempty"`
+	Cause      error          `json:"-"`
+	Retryable  bool           `json:"retryable"`
+	Metadata   map[string]any `json:"metadata,omitempty"`
 }
 
 // Error 实现 error 接口
@@ -221,6 +222,7 @@ var (
 	ErrInvalidLockTimeout   = NewError(ErrCodeInvalidLockTimeout, "invalid lock timeout: must be between 1s and 5m")
 	ErrInvalidRetryAttempts = NewError(ErrCodeInvalidRetryAttempts, "invalid retry attempts: must be between 0 and 10")
 	ErrInvalidRetryInterval = NewError(ErrCodeInvalidRetryInterval, "invalid retry interval: cannot be negative")
+	ErrInvalidLockCacheTTL  = NewError(ErrCodeInvalidLockCacheTTL, "invalid lock cache TTL: must be between 1s and 5m")
 	ErrDrawInterrupted      = NewError(ErrCodeDrawInterrupted, "draw operation interrupted")
 	ErrPartialDrawFailure   = NewError(ErrCodePartialDrawFailure, "partial draw failure: some draws completed successfully, some failed")
 

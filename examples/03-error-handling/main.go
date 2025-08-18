@@ -252,6 +252,7 @@ func productionBestPracticesExample(ctx context.Context, rdb *redis.Client) {
 		30*time.Second,       // 锁超时
 		5,                    // 重试次数
 		100*time.Millisecond, // 重试间隔
+		1*time.Second,
 	)
 	if err != nil {
 		fmt.Printf("❌ 配置创建失败: %v\n", err)

@@ -30,7 +30,7 @@ func main() {
 	fmt.Printf("✓ 配置加载成功，环境: %s\n", getEnvironment())
 
 	// 2. 创建 Redis 客户端
-	redisClient := lottery.NewRedisClientFromConfig(&config.Redis)
+	redisClient := lottery.NewRedisClientFromConfig(config.Redis)
 	defer redisClient.Close()
 
 	// 测试 Redis 连接
@@ -42,20 +42,23 @@ func main() {
 	fmt.Println("✓ Redis 连接成功")
 
 	// 3. 创建抽奖引擎
-	lotteryConfig := lottery.NewLotteryConfigFromConfig(config)
+	lotteryConfig, err := lottery.NewLotteryConfigFromConfig(config)
+	if err != nil {
+		log.Fatalf("Failed to create lottery config: %v", err)
+	}
 	engine := lottery.NewLotteryEngineWithConfig(redisClient, lotteryConfig)
 
 	// 4. 创建带熔断器的引擎
-	cbEngine := lottery.NewCircuitBreakerEngine(engine, &config.CircuitBreaker, engine.GetLogger())
+	cbEngine := lottery.NewCircuitBreakerEngine(engine, config.CircuitBreaker, engine.GetLogger())
 	fmt.Println("✓ 熔断器引擎创建成功")
 
 	// 5. 创建错误处理器
 	errorHandler := lottery.NewDefaultErrorHandler(engine.GetLogger())
-	errorRecovery := lottery.NewErrorRecovery(errorHandler, config.Lottery.RetryAttempts, engine.GetLogger())
+	errorRecovery := lottery.NewErrorRecovery(errorHandler, config.Engine.RetryAttempts, engine.GetLogger())
 
 	// 6. 设置配置热更新监听
 	err = configManager.WatchConfig(func(newConfig *lottery.Config) {
-		fmt.Printf("⚡ 配置已更新: %+v\n", newConfig.Lottery)
+		fmt.Printf("⚡ 配置已更新: %+v\n", newConfig)
 		// 这里可以更新引擎配置
 	})
 	if err != nil {
@@ -179,12 +182,10 @@ func runProductionExamples(ctx context.Context, engine lottery.LotteryDrawer, re
 
 	// 示例5: 配置信息展示
 	fmt.Println("\n5. 当前配置信息")
-	fmt.Printf("   锁超时: %v\n", config.Lottery.LockTimeout)
-	fmt.Printf("   重试次数: %d\n", config.Lottery.RetryAttempts)
-	fmt.Printf("   重试间隔: %v\n", config.Lottery.RetryInterval)
-	fmt.Printf("   状态TTL: %v\n", config.Lottery.StateTTL)
+	fmt.Printf("   锁超时: %v\n", config.Engine.LockTimeout)
+	fmt.Printf("   重试次数: %d\n", config.Engine.RetryAttempts)
+	fmt.Printf("   重试间隔: %v\n", config.Engine.RetryInterval)
 	fmt.Printf("   熔断器启用: %t\n", config.CircuitBreaker.Enabled)
-	fmt.Printf("   监控启用: %t\n", config.Monitoring.EnableMetrics)
 }
 
 // getEnvironment 获取当前环境

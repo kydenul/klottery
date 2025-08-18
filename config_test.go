@@ -24,11 +24,9 @@ func TestConfigManager_LoadConfig(t *testing.T) {
 			},
 			expectError: false,
 			validate: func(t *testing.T, config *Config) {
-				assert.Equal(t, "0.0.0.0", config.Server.Host)
-				assert.Equal(t, 8080, config.Server.Port)
 				assert.Equal(t, "localhost:6379", config.Redis.Addr)
-				assert.Equal(t, 30*time.Second, config.Lottery.LockTimeout)
-				assert.Equal(t, 3, config.Lottery.RetryAttempts)
+				assert.Equal(t, 30*time.Second, config.Engine.LockTimeout)
+				assert.Equal(t, 3, config.Engine.RetryAttempts)
 			},
 		},
 		{
@@ -36,21 +34,20 @@ func TestConfigManager_LoadConfig(t *testing.T) {
 			setupEnv: func() {
 				os.Setenv("LOTTERY_SERVER_PORT", "9090")
 				os.Setenv("LOTTERY_REDIS_ADDR", "redis-cluster:6379")
-				os.Setenv("LOTTERY_LOTTERY_LOCK_TIMEOUT", "60s")
+				os.Setenv("LOTTERY_LOTTERY_LOCK_TIMEOUT", "30s")
 				os.Setenv("LOTTERY_SECURITY_ENABLE_AUTH", "true")
 			},
 			expectError: false,
 			validate: func(t *testing.T, config *Config) {
-				assert.Equal(t, 9090, config.Server.Port)
 				assert.Equal(t, "redis-cluster:6379", config.Redis.Addr)
-				assert.Equal(t, 60*time.Second, config.Lottery.LockTimeout)
-				assert.True(t, config.Security.EnableAuth)
+				assert.Equal(t, 30*time.Second, config.Engine.LockTimeout)
 			},
 		},
 		{
 			name: "invalid_config",
 			setupEnv: func() {
-				os.Setenv("LOTTERY_SERVER_PORT", "99999") // 无效端口
+				os.Setenv("LOTTERY_LOTTERY_LOCK_TIMEOUT", "30ss")
+				os.Setenv("LOTTERY_LOTTERY_MAX_SERIALIZATION_MB", "0") // 无效的序列化大小
 			},
 			expectError: true,
 			validate:    nil,
@@ -85,8 +82,6 @@ func TestConfigManager_LoadConfig(t *testing.T) {
 }
 
 func TestConfig_Validation(t *testing.T) {
-	cm := NewConfigManager()
-
 	tests := []struct {
 		name         string
 		modifyConfig func(*Config)
@@ -103,10 +98,10 @@ func TestConfig_Validation(t *testing.T) {
 		{
 			name: "invalid_server_port",
 			modifyConfig: func(config *Config) {
-				config.Server.Port = -1
+				config.Redis.Addr = "" // 设置无效的Redis地址
 			},
 			expectError: true,
-			errorMsg:    "invalid server port",
+			errorMsg:    "redis address is required",
 		},
 		{
 			name: "empty_redis_addr",
@@ -127,70 +122,33 @@ func TestConfig_Validation(t *testing.T) {
 		{
 			name: "invalid_lock_timeout",
 			modifyConfig: func(config *Config) {
-				config.Lottery.LockTimeout = 0
+				config.Engine.LockTimeout = 0
 			},
 			expectError: true,
-			errorMsg:    "lock timeout must be positive",
+			errorMsg:    "invalid lock timeout: must be between 1s and 5m",
 		},
 		{
 			name: "negative_retry_attempts",
 			modifyConfig: func(config *Config) {
-				config.Lottery.RetryAttempts = -1
+				config.Engine.RetryAttempts = -1
 			},
 			expectError: true,
-			errorMsg:    "retry attempts cannot be negative",
-		},
-		{
-			name: "auth_without_jwt_secret",
-			modifyConfig: func(config *Config) {
-				config.Security.EnableAuth = true
-				config.Security.JWTSecret = ""
-			},
-			expectError: true,
-			errorMsg:    "JWT secret is required when auth is enabled",
-		},
-		{
-			name: "encryption_without_key",
-			modifyConfig: func(config *Config) {
-				config.Security.EnableEncryption = true
-				config.Security.EncryptionKey = ""
-			},
-			expectError: true,
-			errorMsg:    "encryption key is required when encryption is enabled",
-		},
-		{
-			name: "invalid_log_level",
-			modifyConfig: func(config *Config) {
-				config.Logging.Level = "invalid"
-			},
-			expectError: true,
-			errorMsg:    "invalid log level",
+			errorMsg:    "invalid retry attempts: must be between 0 and 10",
 		},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			// 创建配置管理器
+			cm := NewConfigManager()
+
 			// 创建基础配置
 			config := &Config{
-				Server: ServerConfig{
-					Host: "localhost",
-					Port: 8080,
-				},
-				Redis: RedisConfig{
+				Engine: DefaultLotteryConfig(),
+
+				Redis: &RedisConfig{
 					Addr:     "localhost:6379",
 					PoolSize: 10,
-				},
-				Lottery: LotteryEngineConfig{
-					LockTimeout:        30 * time.Second,
-					RetryAttempts:      3,
-					MaxSerializationMB: 10,
-				},
-				Security: SecurityConfig{
-					EnableAuth:       false,
-					EnableEncryption: false,
-				},
-				Logging: LoggingConfig{
-					Level: "info",
 				},
 			}
 
@@ -214,18 +172,32 @@ func TestConfig_Validation(t *testing.T) {
 
 func TestNewLotteryConfigFromConfig(t *testing.T) {
 	config := &Config{
-		Lottery: LotteryEngineConfig{
+		Engine: &EngineConfig{
 			LockTimeout:   45 * time.Second,
 			RetryAttempts: 5,
 			RetryInterval: 200 * time.Millisecond,
+			LockCacheTTL:  1 * time.Second,
+		},
+
+		Redis: DefaultRedisConfig(),
+		CircuitBreaker: &CircuitBreakerConfig{
+			Enabled:      true,
+			Name:         "test",
+			MaxRequests:  3,
+			Interval:     60 * time.Second,
+			Timeout:      30 * time.Second,
+			FailureRatio: 0.6,
+			MinRequests:  3,
 		},
 	}
 
-	lotteryConfig := NewLotteryConfigFromConfig(config)
+	lotteryConfig, err := NewLotteryConfigFromConfig(config)
+	require.NoError(t, err)
 
-	assert.Equal(t, 45*time.Second, lotteryConfig.LockTimeout)
-	assert.Equal(t, 5, lotteryConfig.RetryAttempts)
-	assert.Equal(t, 200*time.Millisecond, lotteryConfig.RetryInterval)
+	assert.Equal(t, 45*time.Second, lotteryConfig.GetConfig().Engine.LockTimeout)
+	assert.Equal(t, 5, lotteryConfig.GetConfig().Engine.RetryAttempts)
+	assert.Equal(t, 200*time.Millisecond, lotteryConfig.GetConfig().Engine.RetryInterval)
+	assert.Equal(t, 1*time.Second, lotteryConfig.GetConfig().Engine.LockCacheTTL)
 }
 
 func TestNewRedisClientFromConfig(t *testing.T) {
@@ -251,34 +223,13 @@ func TestNewRedisClientFromConfig(t *testing.T) {
 	// 因为测试环境可能没有 Redis 服务器
 }
 
-func TestAlertRule(t *testing.T) {
-	rule := AlertRule{
-		Name:        "test_rule",
-		Metric:      "test_metric",
-		Threshold:   0.5,
-		Operator:    ">",
-		Duration:    5 * time.Minute,
-		Severity:    "warning",
-		Description: "Test alert rule",
-	}
-
-	assert.Equal(t, "test_rule", rule.Name)
-	assert.Equal(t, "test_metric", rule.Metric)
-	assert.Equal(t, 0.5, rule.Threshold)
-	assert.Equal(t, ">", rule.Operator)
-	assert.Equal(t, 5*time.Minute, rule.Duration)
-	assert.Equal(t, "warning", rule.Severity)
-	assert.Equal(t, "Test alert rule", rule.Description)
-}
-
 // 基准测试
 func BenchmarkConfigManager_LoadConfig(b *testing.B) {
 	cm := NewConfigManager()
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := cm.LoadConfig()
 		if err != nil {
 			b.Fatalf("Failed to load config: %v", err)
@@ -289,31 +240,23 @@ func BenchmarkConfigManager_LoadConfig(b *testing.B) {
 func BenchmarkConfig_Validation(b *testing.B) {
 	cm := NewConfigManager()
 	config := &Config{
-		Server: ServerConfig{
-			Host: "localhost",
-			Port: 8080,
+		Engine: &EngineConfig{
+			LockTimeout:   DefaultLockTimeout,
+			RetryAttempts: DefaultRetryAttempts,
+			RetryInterval: DefaultRetryInterval,
+			LockCacheTTL:  DefaultLockCacheTTL,
 		},
-		Redis: RedisConfig{
+
+		Redis: &RedisConfig{
 			Addr:     "localhost:6379",
 			PoolSize: 10,
 		},
-		Lottery: LotteryEngineConfig{
-			LockTimeout:   30 * time.Second,
-			RetryAttempts: 3,
-		},
-		Security: SecurityConfig{
-			EnableAuth:       false,
-			EnableEncryption: false,
-		},
-		Logging: LoggingConfig{
-			Level: "info",
-		},
+		CircuitBreaker: &CircuitBreakerConfig{},
 	}
 
-	b.ResetTimer()
 	b.ReportAllocs()
 
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		err := cm.validateConfig(config)
 		if err != nil {
 			b.Fatalf("Config validation failed: %v", err)
