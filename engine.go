@@ -786,7 +786,22 @@ func (e *LotteryEngine) DrawMultipleInRange(
 		return e.drawMultipleInRangeWithLockCache(ctx, lockKey, min, max, count, progressCallback)
 	})
 	if err != nil {
-		return nil, err
+		// For validation errors (invalid parameters, range, count), return nil result
+		if err == ErrInvalidParameters || err == ErrInvalidRange || err == ErrInvalidCount {
+			return nil, err
+		}
+
+		// For circuit breaker errors or other runtime errors, return a proper MultiDrawResult structure
+		errorResult := &MultiDrawResult{
+			Results:        make([]int, 0),
+			TotalRequested: count,
+			Completed:      0,
+			Failed:         count,
+			PartialSuccess: false,
+			LastError:      err,
+			ErrorDetails:   make([]DrawError, 0),
+		}
+		return errorResult, err
 	}
 
 	return result.(*MultiDrawResult), nil
@@ -1024,7 +1039,23 @@ func (e *LotteryEngine) DrawMultipleFromPrizes(ctx context.Context, lockKey stri
 		return e.drawMultipleFromPrizesWithLockCache(ctx, lockKey, prizes, count, progressCallback)
 	})
 	if err != nil {
-		return nil, err
+		// For validation errors (invalid parameters, empty prize pool, invalid count), return nil result
+		if err == ErrInvalidParameters || err == ErrEmptyPrizePool || err == ErrInvalidCount {
+			return nil, err
+		}
+
+		// For circuit breaker errors or other runtime errors, return a proper MultiDrawResult structure
+		errorResult := &MultiDrawResult{
+			Results:        make([]int, 0),
+			PrizeResults:   make([]*Prize, 0),
+			TotalRequested: count,
+			Completed:      0,
+			Failed:         count,
+			PartialSuccess: false,
+			LastError:      err,
+			ErrorDetails:   make([]DrawError, 0),
+		}
+		return errorResult, err
 	}
 
 	return result.(*MultiDrawResult), nil
