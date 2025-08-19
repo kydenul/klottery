@@ -48,15 +48,11 @@ func main() {
 	}
 	engine := lottery.NewLotteryEngineWithConfig(redisClient, lotteryConfig)
 
-	// 4. 创建带熔断器的引擎
-	cbEngine := lottery.NewCircuitBreakerEngine(engine, config.CircuitBreaker, engine.GetLogger())
-	fmt.Println("✓ 熔断器引擎创建成功")
-
-	// 5. 创建错误处理器
+	// 4. 创建错误处理器
 	errorHandler := lottery.NewDefaultErrorHandler(engine.GetLogger())
 	errorRecovery := lottery.NewErrorRecovery(errorHandler, config.Engine.RetryAttempts, engine.GetLogger())
 
-	// 6. 设置配置热更新监听
+	// 5. 设置配置热更新监听
 	err = configManager.WatchConfig(func(newConfig *lottery.Config) {
 		fmt.Printf("⚡ 配置已更新: %+v\n", newConfig)
 		// 这里可以更新引擎配置
@@ -65,10 +61,10 @@ func main() {
 		log.Printf("Failed to watch config: %v", err)
 	}
 
-	// 7. 运行示例
-	runProductionExamples(ctx, cbEngine, errorRecovery, config)
+	// 6. 运行示例
+	runProductionExamples(ctx, engine, errorRecovery, config)
 
-	// 8. 优雅关闭
+	// 7. 优雅关闭
 	gracefulShutdown(redisClient)
 }
 
@@ -171,9 +167,9 @@ func runProductionExamples(
 
 	// 示例4: 熔断器状态监控
 	fmt.Println("\n4. 熔断器状态监控")
-	if cbEngine, ok := engine.(*lottery.CircuitBreakerEngine); ok {
-		state := cbEngine.GetCircuitBreakerState()
-		counts := cbEngine.GetCircuitBreakerCounts()
+	if engine, ok := engine.(*lottery.LotteryEngine); ok {
+		state := engine.GetCircuitBreakerState()
+		counts := engine.GetCircuitBreakerCounts()
 
 		fmt.Printf("   熔断器状态: %s\n", state)
 		fmt.Printf("   请求统计: 总数 %d, 成功 %d, 失败 %d\n",

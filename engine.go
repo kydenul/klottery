@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+	"github.com/sony/gobreaker"
 )
 
 // LotteryEngine provides thread-safe lottery functionality
@@ -14,8 +15,9 @@ type LotteryEngine struct {
 	lockManager   *DistributedLockManager
 	configManager *ConfigManager
 	logger        Logger
-	mu            sync.RWMutex // 保护配置和lockManager的并发访问
+	mu            sync.RWMutex // 保护配置和 lockManager 的并发访问
 
+	circuitBreaker     *gobreaker.CircuitBreaker // 熔断器
 	performanceMonitor *PerformanceMonitor
 	lockCache          sync.Map // 锁缓存，用于快速路径优化
 }
@@ -23,6 +25,28 @@ type LotteryEngine struct {
 // NewLotteryEngine creates a new lottery engine with the given Redis client
 func NewLotteryEngine(redisClient *redis.Client) *LotteryEngine {
 	cm := NewDefaultConfigManager()
+	logger := &DefaultLogger{}
+
+	var breaker *gobreaker.CircuitBreaker
+	// 启用熔断器
+	if cm.config.CircuitBreaker.Enabled {
+		breaker = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+			Name:        cm.config.CircuitBreaker.Name,
+			MaxRequests: cm.config.CircuitBreaker.MaxRequests,
+			Interval:    cm.config.CircuitBreaker.Interval,
+			Timeout:     cm.config.CircuitBreaker.Timeout,
+			ReadyToTrip: func(counts gobreaker.Counts) bool {
+				// 当请求数达到最小要求且失败率超过阈值时触发熔断
+				return counts.Requests >= cm.config.CircuitBreaker.MinRequests &&
+					float64(counts.TotalFailures)/float64(counts.Requests) >= cm.config.CircuitBreaker.FailureRatio
+			},
+			OnStateChange: func(name string, from, to gobreaker.State) {
+				if cm.config.CircuitBreaker.OnStateChange && logger != nil {
+					logger.Info("Circuit breaker '%s' state changed from %s to %s", name, from, to)
+				}
+			},
+		})
+	}
 
 	return &LotteryEngine{
 		redisClient: redisClient,
@@ -34,14 +58,38 @@ func NewLotteryEngine(redisClient *redis.Client) *LotteryEngine {
 			cm.config.Engine.LockCacheTTL,
 		),
 		configManager: cm,
-		logger:        &DefaultLogger{},
+		logger:        logger,
 
+		circuitBreaker:     breaker,
 		performanceMonitor: NewPerformanceMonitor(),
 	}
 }
 
 // NewLotteryEngineWithConfig creates a new lottery engine with custom configuration
 func NewLotteryEngineWithConfig(redisClient *redis.Client, cm *ConfigManager) *LotteryEngine {
+	logger := &DefaultLogger{}
+
+	var breaker *gobreaker.CircuitBreaker
+	// 启用熔断器
+	if cm.config.CircuitBreaker.Enabled {
+		breaker = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+			Name:        cm.config.CircuitBreaker.Name,
+			MaxRequests: cm.config.CircuitBreaker.MaxRequests,
+			Interval:    cm.config.CircuitBreaker.Interval,
+			Timeout:     cm.config.CircuitBreaker.Timeout,
+			ReadyToTrip: func(counts gobreaker.Counts) bool {
+				// 当请求数达到最小要求且失败率超过阈值时触发熔断
+				return counts.Requests >= cm.config.CircuitBreaker.MinRequests &&
+					float64(counts.TotalFailures)/float64(counts.Requests) >= cm.config.CircuitBreaker.FailureRatio
+			},
+			OnStateChange: func(name string, from, to gobreaker.State) {
+				if cm.config.CircuitBreaker.OnStateChange && logger != nil {
+					logger.Info("Circuit breaker '%s' state changed from %s to %s", name, from, to)
+				}
+			},
+		})
+	}
+
 	return &LotteryEngine{
 		redisClient: redisClient,
 		lockManager: NewLockManagerWithRetry(
@@ -52,8 +100,9 @@ func NewLotteryEngineWithConfig(redisClient *redis.Client, cm *ConfigManager) *L
 			cm.config.Engine.LockCacheTTL,
 		),
 		configManager: cm,
-		logger:        &DefaultLogger{},
+		logger:        logger,
 
+		circuitBreaker:     breaker,
 		performanceMonitor: NewPerformanceMonitor(),
 	}
 }
@@ -61,6 +110,27 @@ func NewLotteryEngineWithConfig(redisClient *redis.Client, cm *ConfigManager) *L
 // NewLotteryEngineWithLogger creates a new lottery engine with custom logger
 func NewLotteryEngineWithLogger(redisClient *redis.Client, logger Logger) *LotteryEngine {
 	cm := NewDefaultConfigManager()
+
+	var breaker *gobreaker.CircuitBreaker
+	// 启用熔断器
+	if cm.config.CircuitBreaker.Enabled {
+		breaker = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+			Name:        cm.config.CircuitBreaker.Name,
+			MaxRequests: cm.config.CircuitBreaker.MaxRequests,
+			Interval:    cm.config.CircuitBreaker.Interval,
+			Timeout:     cm.config.CircuitBreaker.Timeout,
+			ReadyToTrip: func(counts gobreaker.Counts) bool {
+				// 当请求数达到最小要求且失败率超过阈值时触发熔断
+				return counts.Requests >= cm.config.CircuitBreaker.MinRequests &&
+					float64(counts.TotalFailures)/float64(counts.Requests) >= cm.config.CircuitBreaker.FailureRatio
+			},
+			OnStateChange: func(name string, from, to gobreaker.State) {
+				if cm.config.CircuitBreaker.OnStateChange && logger != nil {
+					logger.Info("Circuit breaker '%s' state changed from %s to %s", name, from, to)
+				}
+			},
+		})
+	}
 
 	lockManager := NewLockManagerWithRetry(
 		redisClient,
@@ -76,28 +146,51 @@ func NewLotteryEngineWithLogger(redisClient *redis.Client, logger Logger) *Lotte
 		configManager: cm,
 		logger:        logger,
 
+		circuitBreaker:     breaker,
 		performanceMonitor: NewPerformanceMonitor(),
 	}
 }
 
 // NewLotteryEngineWithConfigAndLogger creates a new lottery engine with custom configuration and logger
 func NewLotteryEngineWithConfigAndLogger(
-	redisClient *redis.Client, configManager *ConfigManager, logger Logger,
+	redisClient *redis.Client, cm *ConfigManager, logger Logger,
 ) *LotteryEngine {
 	lockManager := NewLockManagerWithRetry(
 		redisClient,
-		configManager.config.Engine.LockTimeout,
-		configManager.config.Engine.RetryAttempts,
-		configManager.config.Engine.RetryInterval,
-		configManager.config.Engine.LockCacheTTL,
+		cm.config.Engine.LockTimeout,
+		cm.config.Engine.RetryAttempts,
+		cm.config.Engine.RetryInterval,
+		cm.config.Engine.LockCacheTTL,
 	)
+
+	var breaker *gobreaker.CircuitBreaker
+	// 启用熔断器
+	if cm.config.CircuitBreaker.Enabled {
+		breaker = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+			Name:        cm.config.CircuitBreaker.Name,
+			MaxRequests: cm.config.CircuitBreaker.MaxRequests,
+			Interval:    cm.config.CircuitBreaker.Interval,
+			Timeout:     cm.config.CircuitBreaker.Timeout,
+			ReadyToTrip: func(counts gobreaker.Counts) bool {
+				// 当请求数达到最小要求且失败率超过阈值时触发熔断
+				return counts.Requests >= cm.config.CircuitBreaker.MinRequests &&
+					float64(counts.TotalFailures)/float64(counts.Requests) >= cm.config.CircuitBreaker.FailureRatio
+			},
+			OnStateChange: func(name string, from, to gobreaker.State) {
+				if cm.config.CircuitBreaker.OnStateChange && logger != nil {
+					logger.Info("Circuit breaker '%s' state changed from %s to %s", name, from, to)
+				}
+			},
+		})
+	}
 
 	return &LotteryEngine{
 		redisClient:   redisClient,
 		lockManager:   lockManager,
-		configManager: configManager,
+		configManager: cm,
 		logger:        logger,
 
+		circuitBreaker:     breaker,
 		performanceMonitor: NewPerformanceMonitor(),
 	}
 }
@@ -256,298 +349,24 @@ func (e *LotteryEngine) shouldAbortOnError(err error) bool {
 	}
 }
 
-// RollbackMultiDraw attempts to rollback a partially completed multi-draw operation
-func (e *LotteryEngine) RollbackMultiDraw(ctx context.Context, drawState *DrawState) error {
-	// Check for nil draw state first
-	if drawState == nil {
-		e.logger.Error("RollbackMultiDraw failed: nil draw state")
-		return ErrDrawStateCorrupted
+func (e *LotteryEngine) executeWithBreaker(operation func() (any, error)) (any, error) {
+	// Circuit breaker DON'T ENABLED => execute operation directly
+	if e.configManager.config.CircuitBreaker.Enabled == false || e.circuitBreaker == nil {
+		return operation()
 	}
 
-	e.logger.Info("RollbackMultiDraw called for lockKey=%s, completed=%d/%d",
-		drawState.LockKey, drawState.CompletedCount, drawState.TotalCount)
-
-	// Validate draw state
-	if err := drawState.Validate(); err != nil {
-		e.logger.Error("RollbackMultiDraw failed: invalid draw state: %v", err)
-		return ErrDrawStateCorrupted
-	}
-
-	// Create state persistence manager for cleanup operations
-	spm := NewStatePersistenceManager(e.redisClient, e.logger)
-
-	// Find all state keys for this lock key to clean up
-	stateKeys, err := spm.findStateKeys(ctx, drawState.LockKey)
+	result, err := e.circuitBreaker.Execute(operation)
 	if err != nil {
-		// Log the error but don't fail the rollback - cleanup is best effort
-		e.logger.Error("RollbackMultiDraw failed to find state keys for cleanup: lockKey=%s, error=%v",
-			drawState.LockKey, err)
-	} else {
-		// Clean up all found state keys
-		cleanupCount := 0
-		for _, key := range stateKeys {
-			if cleanupErr := spm.deleteState(ctx, key); cleanupErr != nil {
-				// Log cleanup failures but continue with rollback
-				e.logger.Error("RollbackMultiDraw failed to cleanup state key: key=%s, error=%v",
-					key, cleanupErr)
-			} else {
-				cleanupCount++
-				e.logger.Debug("RollbackMultiDraw cleaned up state key: %s", key)
-			}
+		// 检查是否是熔断器错误
+		if err == gobreaker.ErrOpenState {
+			return nil, ErrCircuitBreakerOpen.WithDetails("circuit breaker is open, requests are being rejected")
 		}
-
-		if cleanupCount > 0 {
-			e.logger.Info("RollbackMultiDraw cleaned up %d state keys for lockKey=%s",
-				cleanupCount, drawState.LockKey)
-		} else if len(stateKeys) > 0 {
-			e.logger.Error("RollbackMultiDraw failed to cleanup any of %d state keys for lockKey=%s",
-				len(stateKeys), drawState.LockKey)
-		} else {
-			e.logger.Debug("RollbackMultiDraw found no state keys to cleanup for lockKey=%s",
-				drawState.LockKey)
+		if err == gobreaker.ErrTooManyRequests {
+			return nil, ErrCircuitBreakerOpen.WithDetails("too many requests, circuit breaker is half-open")
 		}
 	}
 
-	// Log rollback completion for audit trail
-	e.logger.Info("Rollback completed for lockKey=%s, progress was %.1f%% (%d/%d completed)",
-		drawState.LockKey, drawState.Progress(), drawState.CompletedCount, drawState.TotalCount)
-
-	return nil
-}
-
-// SaveDrawState saves the current state of a multi-draw operation to Redis
-func (e *LotteryEngine) SaveDrawState(ctx context.Context, drawState *DrawState) error {
-	// Check for nil draw state first
-	if drawState == nil {
-		e.logger.Error("SaveDrawState failed: nil draw state")
-		return ErrDrawStateCorrupted
-	}
-
-	e.logger.Debug("SaveDrawState called for lockKey=%s, progress=%.1f%%",
-		drawState.LockKey, drawState.Progress())
-
-	// Validate draw state
-	if err := drawState.Validate(); err != nil {
-		e.logger.Error("SaveDrawState failed: invalid draw state: %v", err)
-		return ErrDrawStateCorrupted
-	}
-
-	// Update timestamp
-	drawState.LastUpdateTime = time.Now().Unix()
-
-	// Create state persistence manager
-	spm := NewStatePersistenceManager(e.redisClient, e.logger)
-
-	// Generate Redis key for this state
-	stateKey := generateStateKey(drawState.LockKey)
-	if stateKey == "" {
-		e.logger.Error("SaveDrawState failed: unable to generate state key for lockKey=%s", drawState.LockKey)
-		return ErrInvalidParameters
-	}
-
-	// Save state to Redis with TTL
-	if err := spm.saveState(ctx, stateKey, drawState, DefaultStateTTL); err != nil {
-		e.logger.Error("SaveDrawState failed to save to Redis: lockKey=%s, error=%v", drawState.LockKey, err)
-		return err
-	}
-
-	e.logger.Info("Draw state saved successfully: lockKey=%s, stateKey=%s, progress=%.1f%%",
-		drawState.LockKey, stateKey, drawState.Progress())
-	return nil
-}
-
-// LoadDrawState loads a previously saved draw state from Redis
-func (e *LotteryEngine) LoadDrawState(ctx context.Context, lockKey string) (*DrawState, error) {
-	e.logger.Debug("LoadDrawState called for lockKey=%s", lockKey)
-
-	if lockKey == "" {
-		e.logger.Error("LoadDrawState failed: empty lock key")
-		return nil, ErrInvalidParameters
-	}
-
-	// Create state persistence manager
-	spm := NewStatePersistenceManager(e.redisClient, e.logger)
-
-	// Find all state keys for this lock key
-	stateKeys, err := spm.findStateKeys(ctx, lockKey)
-	if err != nil {
-		e.logger.Error("LoadDrawState failed to find state keys: lockKey=%s, error=%v", lockKey, err)
-		return nil, err
-	}
-
-	if len(stateKeys) == 0 {
-		e.logger.Debug("No saved state found for lockKey=%s", lockKey)
-		return nil, nil
-	}
-
-	// Find the most recent state key (based on operation ID timestamp)
-	var mostRecentKey string
-	var mostRecentOperationID string
-	for _, key := range stateKeys {
-		_, operationID, parseErr := parseStateKey(key)
-		if parseErr != nil {
-			e.logger.Debug("Skipping invalid state key: %s, error=%v", key, parseErr)
-			continue
-		}
-
-		if mostRecentOperationID == "" || operationID > mostRecentOperationID {
-			mostRecentOperationID = operationID
-			mostRecentKey = key
-		}
-	}
-
-	if mostRecentKey == "" {
-		e.logger.Debug("No valid state keys found for lockKey=%s", lockKey)
-		return nil, nil
-	}
-
-	// Load the most recent state
-	drawState, err := spm.loadState(ctx, mostRecentKey)
-	if err != nil {
-		e.logger.Error("LoadDrawState failed to load state: lockKey=%s, stateKey=%s, error=%v",
-			lockKey, mostRecentKey, err)
-		return nil, err
-	}
-
-	if drawState == nil {
-		e.logger.Debug("State key exists but no data found: lockKey=%s, stateKey=%s", lockKey, mostRecentKey)
-		return nil, nil
-	}
-
-	// Validate the loaded state
-	if err := drawState.Validate(); err != nil {
-		e.logger.Error("LoadDrawState loaded invalid state: lockKey=%s, stateKey=%s, error=%v",
-			lockKey, mostRecentKey, err)
-		return nil, ErrDrawStateCorrupted
-	}
-
-	e.logger.Info("Draw state loaded successfully: lockKey=%s, stateKey=%s, progress=%.1f%%",
-		lockKey, mostRecentKey, drawState.Progress())
-	return drawState, nil
-}
-
-// ResumeMultiDrawInRange resumes a previously interrupted multi-draw range operation
-func (e *LotteryEngine) ResumeMultiDrawInRange(
-	ctx context.Context, lockKey string, min, max, count int,
-) (*MultiDrawResult, error) {
-	e.logger.Info("ResumeMultiDrawInRange called for lockKey=%s", lockKey)
-
-	// Try to load previous state
-	savedState, err := e.LoadDrawState(ctx, lockKey)
-	if err != nil {
-		e.logger.Error("Failed to load draw state: %v", err)
-		return nil, err
-	}
-
-	if savedState == nil {
-		// No saved state, start fresh
-		e.logger.Info("No saved state found, starting fresh multi-draw operation")
-		return e.DrawMultipleInRange(ctx, lockKey, min, max, count, nil)
-	}
-
-	// Validate that the saved state matches the current request
-	if savedState.TotalCount != count {
-		e.logger.Error("Saved state count mismatch: saved=%d, requested=%d", savedState.TotalCount, count)
-		return nil, ErrDrawStateCorrupted
-	}
-
-	// Resume from where we left off
-	remainingCount := count - savedState.CompletedCount
-	if remainingCount <= 0 {
-		// Already completed
-		result := &MultiDrawResult{
-			Results:        savedState.Results,
-			TotalRequested: count,
-			Completed:      savedState.CompletedCount,
-			Failed:         0,
-			PartialSuccess: false,
-		}
-		return result, nil
-	}
-
-	e.logger.Info("Resuming multi-draw operation: %d/%d completed, %d remaining",
-		savedState.CompletedCount, count, remainingCount)
-
-	// Continue with remaining draws
-	remainingResult, err := e.DrawMultipleInRange(ctx, lockKey, min, max, remainingCount, nil)
-	if err != nil && remainingResult == nil {
-		return nil, err
-	}
-
-	// Combine results
-	combinedResult := &MultiDrawResult{
-		Results:        append(savedState.Results, remainingResult.Results...),
-		TotalRequested: count,
-		Completed:      savedState.CompletedCount + remainingResult.Completed,
-		Failed:         remainingResult.Failed,
-		PartialSuccess: remainingResult.PartialSuccess || (savedState.CompletedCount > 0 && remainingResult.Failed > 0),
-		LastError:      remainingResult.LastError,
-		ErrorDetails:   remainingResult.ErrorDetails,
-	}
-
-	return combinedResult, err
-}
-
-// ResumeMultiDrawFromPrizes resumes a previously interrupted multi-draw prize operation
-func (e *LotteryEngine) ResumeMultiDrawFromPrizes(
-	ctx context.Context, lockKey string, prizes []Prize, count int,
-) (*MultiDrawResult, error) {
-	e.logger.Info("ResumeMultiDrawFromPrizes called for lockKey=%s", lockKey)
-
-	// Try to load previous state
-	savedState, err := e.LoadDrawState(ctx, lockKey)
-	if err != nil {
-		e.logger.Error("Failed to load draw state: %v", err)
-		return nil, err
-	}
-
-	if savedState == nil {
-		// No saved state, start fresh
-		e.logger.Info("No saved state found, starting fresh multi-draw operation")
-		return e.DrawMultipleFromPrizes(ctx, lockKey, prizes, count, nil)
-	}
-
-	// Validate that the saved state matches the current request
-	if savedState.TotalCount != count {
-		e.logger.Error("Saved state count mismatch: saved=%d, requested=%d", savedState.TotalCount, count)
-		return nil, ErrDrawStateCorrupted
-	}
-
-	// Resume from where we left off
-	remainingCount := count - savedState.CompletedCount
-	if remainingCount <= 0 {
-		// Already completed
-		result := &MultiDrawResult{
-			PrizeResults:   savedState.PrizeResults,
-			TotalRequested: count,
-			Completed:      savedState.CompletedCount,
-			Failed:         0,
-			PartialSuccess: false,
-		}
-		return result, nil
-	}
-
-	e.logger.Info("Resuming multi-draw operation: %d/%d completed, %d remaining",
-		savedState.CompletedCount, count, remainingCount)
-
-	// Continue with remaining draws
-	remainingResult, err := e.DrawMultipleFromPrizes(ctx, lockKey, prizes, remainingCount, nil)
-	if err != nil && remainingResult == nil {
-		return nil, err
-	}
-
-	// Combine results
-	combinedResult := &MultiDrawResult{
-		PrizeResults:   append(savedState.PrizeResults, remainingResult.PrizeResults...),
-		TotalRequested: count,
-		Completed:      savedState.CompletedCount + remainingResult.Completed,
-		Failed:         remainingResult.Failed,
-		PartialSuccess: remainingResult.PartialSuccess || (savedState.CompletedCount > 0 && remainingResult.Failed > 0),
-		LastError:      remainingResult.LastError,
-		ErrorDetails:   remainingResult.ErrorDetails,
-	}
-
-	return combinedResult, err
+	return result, err
 }
 
 // doDrawInRange draws a random number within the specified range using distributed lock
@@ -611,7 +430,7 @@ func (e *LotteryEngine) doDrawInRange(ctx context.Context, lockKey string, min, 
 }
 
 // DrawInRange draws a random number within the specified range using distributed lock [with lock cache]
-func (e *LotteryEngine) DrawInRange(ctx context.Context, lockKey string, min, max int) (int, error) {
+func (e *LotteryEngine) drawInRangeWithLockCache(ctx context.Context, lockKey string, min, max int) (int, error) {
 	startTime := time.Now()
 
 	// Check lock cache (fast path)
@@ -649,6 +468,18 @@ func (e *LotteryEngine) DrawInRange(ctx context.Context, lockKey string, min, ma
 	}
 
 	return result, err
+}
+
+// DrawInRange draws a random number within the specified range using distributed lock [with lock cache and circuit breaker]
+func (e *LotteryEngine) DrawInRange(ctx context.Context, lockKey string, min, max int) (int, error) {
+	result, err := e.executeWithBreaker(func() (any, error) {
+		return e.drawInRangeWithLockCache(ctx, lockKey, min, max)
+	})
+	if err != nil {
+		return 0, err
+	}
+
+	return result.(int), nil
 }
 
 // doDrawFromPrizes draws a prize from the given prize pool using distributed lock
@@ -720,7 +551,7 @@ func (e *LotteryEngine) doDrawFromPrizes(ctx context.Context, lockKey string, pr
 }
 
 // DrawFromPrizesdraws a prize from the given prize pool using distributed lock [with lock cache]
-func (e *LotteryEngine) DrawFromPrizes(
+func (e *LotteryEngine) drawFromPrizesWithLockCache(
 	ctx context.Context, lockKey string, prizes []Prize,
 ) (*Prize, error) {
 	startTime := time.Now()
@@ -762,9 +593,22 @@ func (e *LotteryEngine) DrawFromPrizes(
 	return result, err
 }
 
-// DrawMultipleInRange draws multiple random numbers with performance optimizations,
-// enhanced error handling, and recovery capabilities.
-func (e *LotteryEngine) DrawMultipleInRange(
+// DrawFromPrizesdraws a prize from the given prize pool using distributed lock [with lock cache and circuit breaker]
+func (e *LotteryEngine) DrawFromPrizes(
+	ctx context.Context, lockKey string, prizes []Prize,
+) (*Prize, error) {
+	result, err := e.executeWithBreaker(func() (any, error) {
+		return e.drawFromPrizesWithLockCache(ctx, lockKey, prizes)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result.(*Prize), nil
+}
+
+// DrawMultipleInRange draws multiple random numbers within the specified range using distributed lock [with lock cache]
+func (e *LotteryEngine) drawMultipleInRangeWithLockCache(
 	ctx context.Context, lockKey string, min, max, count int, progressCallback ProgressCallback,
 ) (*MultiDrawResult, error) {
 	e.logger.Debug("DrawMultipleInRange called with lockKey=%s, min=%d, max=%d, count=%d", lockKey, min, max, count)
@@ -934,8 +778,22 @@ func (e *LotteryEngine) DrawMultipleInRange(
 	return result, nil
 }
 
-// DrawMultipleFromPrizes draws multiple prizes from the given prize pool using distributed lock
-func (e *LotteryEngine) DrawMultipleFromPrizes(ctx context.Context, lockKey string, prizes []Prize, count int, progressCallback ProgressCallback,
+// DrawMultipleInRange draws multiple random numbers within the specified range using distributed lock [with lock cache and circuit breaker]
+func (e *LotteryEngine) DrawMultipleInRange(
+	ctx context.Context, lockKey string, min, max, count int, progressCallback ProgressCallback,
+) (*MultiDrawResult, error) {
+	result, err := e.executeWithBreaker(func() (any, error) {
+		return e.drawMultipleInRangeWithLockCache(ctx, lockKey, min, max, count, progressCallback)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result.(*MultiDrawResult), nil
+}
+
+// DrawMultipleFromPrizes draws multiple prizes from the given prize pool using distributed lock [with lock cache]
+func (e *LotteryEngine) drawMultipleFromPrizesWithLockCache(ctx context.Context, lockKey string, prizes []Prize, count int, progressCallback ProgressCallback,
 ) (*MultiDrawResult, error) {
 	startTime := time.Now()
 	e.logger.Debug("DrawMultipleFromPrizes called for lockKey=%s, count=%d", lockKey, count)
@@ -1161,6 +1019,369 @@ func (e *LotteryEngine) DrawMultipleFromPrizes(ctx context.Context, lockKey stri
 	return result, nil
 }
 
+func (e *LotteryEngine) DrawMultipleFromPrizes(ctx context.Context, lockKey string, prizes []Prize, count int, progressCallback ProgressCallback) (*MultiDrawResult, error) {
+	result, err := e.executeWithBreaker(func() (any, error) {
+		return e.drawMultipleFromPrizesWithLockCache(ctx, lockKey, prizes, count, progressCallback)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result.(*MultiDrawResult), nil
+}
+
+// RollbackMultiDraw attempts to rollback a partially completed multi-draw operation
+func (e *LotteryEngine) rollbackMultiDraw(ctx context.Context, drawState *DrawState) error {
+	// Check for nil draw state first
+	if drawState == nil {
+		e.logger.Error("RollbackMultiDraw failed: nil draw state")
+		return ErrDrawStateCorrupted
+	}
+
+	e.logger.Info("RollbackMultiDraw called for lockKey=%s, completed=%d/%d",
+		drawState.LockKey, drawState.CompletedCount, drawState.TotalCount)
+
+	// Validate draw state
+	if err := drawState.Validate(); err != nil {
+		e.logger.Error("RollbackMultiDraw failed: invalid draw state: %v", err)
+		return ErrDrawStateCorrupted
+	}
+
+	// Create state persistence manager for cleanup operations
+	spm := NewStatePersistenceManager(e.redisClient, e.logger)
+
+	// Find all state keys for this lock key to clean up
+	stateKeys, err := spm.findStateKeys(ctx, drawState.LockKey)
+	if err != nil {
+		// Log the error but don't fail the rollback - cleanup is best effort
+		e.logger.Error("RollbackMultiDraw failed to find state keys for cleanup: lockKey=%s, error=%v",
+			drawState.LockKey, err)
+	} else {
+		// Clean up all found state keys
+		cleanupCount := 0
+		for _, key := range stateKeys {
+			if cleanupErr := spm.deleteState(ctx, key); cleanupErr != nil {
+				// Log cleanup failures but continue with rollback
+				e.logger.Error("RollbackMultiDraw failed to cleanup state key: key=%s, error=%v",
+					key, cleanupErr)
+			} else {
+				cleanupCount++
+				e.logger.Debug("RollbackMultiDraw cleaned up state key: %s", key)
+			}
+		}
+
+		if cleanupCount > 0 {
+			e.logger.Info("RollbackMultiDraw cleaned up %d state keys for lockKey=%s",
+				cleanupCount, drawState.LockKey)
+		} else if len(stateKeys) > 0 {
+			e.logger.Error("RollbackMultiDraw failed to cleanup any of %d state keys for lockKey=%s",
+				len(stateKeys), drawState.LockKey)
+		} else {
+			e.logger.Debug("RollbackMultiDraw found no state keys to cleanup for lockKey=%s",
+				drawState.LockKey)
+		}
+	}
+
+	// Log rollback completion for audit trail
+	e.logger.Info("Rollback completed for lockKey=%s, progress was %.1f%% (%d/%d completed)",
+		drawState.LockKey, drawState.Progress(), drawState.CompletedCount, drawState.TotalCount)
+
+	return nil
+}
+
+// RollbackMultiDraw attempts to rollback a partially completed multi-draw operation
+func (e *LotteryEngine) RollbackMultiDraw(ctx context.Context, drawState *DrawState) error {
+	_, err := e.executeWithBreaker(func() (any, error) {
+		return nil, e.rollbackMultiDraw(ctx, drawState)
+	})
+
+	return err
+}
+
+// SaveDrawState saves the current state of a multi-draw operation to Redis
+func (e *LotteryEngine) saveDrawState(ctx context.Context, drawState *DrawState) error {
+	// Check for nil draw state first
+	if drawState == nil {
+		e.logger.Error("SaveDrawState failed: nil draw state")
+		return ErrDrawStateCorrupted
+	}
+
+	e.logger.Debug("SaveDrawState called for lockKey=%s, progress=%.1f%%",
+		drawState.LockKey, drawState.Progress())
+
+	// Validate draw state
+	if err := drawState.Validate(); err != nil {
+		e.logger.Error("SaveDrawState failed: invalid draw state: %v", err)
+		return ErrDrawStateCorrupted
+	}
+
+	// Update timestamp
+	drawState.LastUpdateTime = time.Now().Unix()
+
+	// Create state persistence manager
+	spm := NewStatePersistenceManager(e.redisClient, e.logger)
+
+	// Generate Redis key for this state
+	stateKey := generateStateKey(drawState.LockKey)
+	if stateKey == "" {
+		e.logger.Error("SaveDrawState failed: unable to generate state key for lockKey=%s", drawState.LockKey)
+		return ErrInvalidParameters
+	}
+
+	// Save state to Redis with TTL
+	if err := spm.saveState(ctx, stateKey, drawState, DefaultStateTTL); err != nil {
+		e.logger.Error("SaveDrawState failed to save to Redis: lockKey=%s, error=%v", drawState.LockKey, err)
+		return err
+	}
+
+	e.logger.Info("Draw state saved successfully: lockKey=%s, stateKey=%s, progress=%.1f%%",
+		drawState.LockKey, stateKey, drawState.Progress())
+	return nil
+}
+
+// SaveDrawState saves the current state of a multi-draw operation to Redis
+func (e *LotteryEngine) SaveDrawState(ctx context.Context, drawState *DrawState) error {
+	_, err := e.executeWithBreaker(func() (any, error) {
+		return nil, e.saveDrawState(ctx, drawState)
+	})
+
+	return err
+}
+
+// LoadDrawState loads a previously saved draw state from Redis
+func (e *LotteryEngine) loadDrawState(ctx context.Context, lockKey string) (*DrawState, error) {
+	e.logger.Debug("LoadDrawState called for lockKey=%s", lockKey)
+
+	if lockKey == "" {
+		e.logger.Error("LoadDrawState failed: empty lock key")
+		return nil, ErrInvalidParameters
+	}
+
+	// Create state persistence manager
+	spm := NewStatePersistenceManager(e.redisClient, e.logger)
+
+	// Find all state keys for this lock key
+	stateKeys, err := spm.findStateKeys(ctx, lockKey)
+	if err != nil {
+		e.logger.Error("LoadDrawState failed to find state keys: lockKey=%s, error=%v", lockKey, err)
+		return nil, err
+	}
+
+	if len(stateKeys) == 0 {
+		e.logger.Debug("No saved state found for lockKey=%s", lockKey)
+		return nil, nil
+	}
+
+	// Find the most recent state key (based on operation ID timestamp)
+	var mostRecentKey string
+	var mostRecentOperationID string
+	for _, key := range stateKeys {
+		_, operationID, parseErr := parseStateKey(key)
+		if parseErr != nil {
+			e.logger.Debug("Skipping invalid state key: %s, error=%v", key, parseErr)
+			continue
+		}
+
+		if mostRecentOperationID == "" || operationID > mostRecentOperationID {
+			mostRecentOperationID = operationID
+			mostRecentKey = key
+		}
+	}
+
+	if mostRecentKey == "" {
+		e.logger.Debug("No valid state keys found for lockKey=%s", lockKey)
+		return nil, nil
+	}
+
+	// Load the most recent state
+	drawState, err := spm.loadState(ctx, mostRecentKey)
+	if err != nil {
+		e.logger.Error("LoadDrawState failed to load state: lockKey=%s, stateKey=%s, error=%v",
+			lockKey, mostRecentKey, err)
+		return nil, err
+	}
+
+	if drawState == nil {
+		e.logger.Debug("State key exists but no data found: lockKey=%s, stateKey=%s", lockKey, mostRecentKey)
+		return nil, nil
+	}
+
+	// Validate the loaded state
+	if err := drawState.Validate(); err != nil {
+		e.logger.Error("LoadDrawState loaded invalid state: lockKey=%s, stateKey=%s, error=%v",
+			lockKey, mostRecentKey, err)
+		return nil, ErrDrawStateCorrupted
+	}
+
+	e.logger.Info("Draw state loaded successfully: lockKey=%s, stateKey=%s, progress=%.1f%%",
+		lockKey, mostRecentKey, drawState.Progress())
+	return drawState, nil
+}
+
+// LoadDrawState loads a previously saved draw state from Redis
+func (e *LotteryEngine) LoadDrawState(ctx context.Context, lockKey string) (*DrawState, error) {
+	result, err := e.executeWithBreaker(func() (any, error) {
+		return e.loadDrawState(ctx, lockKey)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	if result == nil {
+		return nil, nil
+	}
+
+	return result.(*DrawState), nil
+}
+
+// ResumeMultiDrawInRange resumes a previously interrupted multi-draw range operation
+func (e *LotteryEngine) resumeMultiDrawInRange(
+	ctx context.Context, lockKey string, min, max, count int,
+) (*MultiDrawResult, error) {
+	e.logger.Info("ResumeMultiDrawInRange called for lockKey=%s", lockKey)
+
+	// Try to load previous state
+	savedState, err := e.LoadDrawState(ctx, lockKey)
+	if err != nil {
+		e.logger.Error("Failed to load draw state: %v", err)
+		return nil, err
+	}
+
+	if savedState == nil {
+		// No saved state, start fresh
+		e.logger.Info("No saved state found, starting fresh multi-draw operation")
+		return e.DrawMultipleInRange(ctx, lockKey, min, max, count, nil)
+	}
+
+	// Validate that the saved state matches the current request
+	if savedState.TotalCount != count {
+		e.logger.Error("Saved state count mismatch: saved=%d, requested=%d", savedState.TotalCount, count)
+		return nil, ErrDrawStateCorrupted
+	}
+
+	// Resume from where we left off
+	remainingCount := count - savedState.CompletedCount
+	if remainingCount <= 0 {
+		// Already completed
+		result := &MultiDrawResult{
+			Results:        savedState.Results,
+			TotalRequested: count,
+			Completed:      savedState.CompletedCount,
+			Failed:         0,
+			PartialSuccess: false,
+		}
+		return result, nil
+	}
+
+	e.logger.Info("Resuming multi-draw operation: %d/%d completed, %d remaining",
+		savedState.CompletedCount, count, remainingCount)
+
+	// Continue with remaining draws
+	remainingResult, err := e.DrawMultipleInRange(ctx, lockKey, min, max, remainingCount, nil)
+	if err != nil && remainingResult == nil {
+		return nil, err
+	}
+
+	// Combine results
+	combinedResult := &MultiDrawResult{
+		Results:        append(savedState.Results, remainingResult.Results...),
+		TotalRequested: count,
+		Completed:      savedState.CompletedCount + remainingResult.Completed,
+		Failed:         remainingResult.Failed,
+		PartialSuccess: remainingResult.PartialSuccess || (savedState.CompletedCount > 0 && remainingResult.Failed > 0),
+		LastError:      remainingResult.LastError,
+		ErrorDetails:   remainingResult.ErrorDetails,
+	}
+
+	return combinedResult, err
+}
+
+// ResumeMultiDrawInRange resumes a previously interrupted multi-draw range operation
+func (e *LotteryEngine) ResumeMultiDrawInRange(ctx context.Context, lockKey string, min, max, count int) (*MultiDrawResult, error) {
+	result, err := e.executeWithBreaker(func() (any, error) {
+		return e.resumeMultiDrawInRange(ctx, lockKey, min, max, count)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result.(*MultiDrawResult), nil
+}
+
+// ResumeMultiDrawFromPrizes resumes a previously interrupted multi-draw prize operation
+func (e *LotteryEngine) resumeMultiDrawFromPrizes(
+	ctx context.Context, lockKey string, prizes []Prize, count int,
+) (*MultiDrawResult, error) {
+	e.logger.Info("ResumeMultiDrawFromPrizes called for lockKey=%s", lockKey)
+
+	// Try to load previous state
+	savedState, err := e.LoadDrawState(ctx, lockKey)
+	if err != nil {
+		e.logger.Error("Failed to load draw state: %v", err)
+		return nil, err
+	}
+
+	if savedState == nil {
+		// No saved state, start fresh
+		e.logger.Info("No saved state found, starting fresh multi-draw operation")
+		return e.DrawMultipleFromPrizes(ctx, lockKey, prizes, count, nil)
+	}
+
+	// Validate that the saved state matches the current request
+	if savedState.TotalCount != count {
+		e.logger.Error("Saved state count mismatch: saved=%d, requested=%d", savedState.TotalCount, count)
+		return nil, ErrDrawStateCorrupted
+	}
+
+	// Resume from where we left off
+	remainingCount := count - savedState.CompletedCount
+	if remainingCount <= 0 {
+		// Already completed
+		result := &MultiDrawResult{
+			PrizeResults:   savedState.PrizeResults,
+			TotalRequested: count,
+			Completed:      savedState.CompletedCount,
+			Failed:         0,
+			PartialSuccess: false,
+		}
+		return result, nil
+	}
+
+	e.logger.Info("Resuming multi-draw operation: %d/%d completed, %d remaining",
+		savedState.CompletedCount, count, remainingCount)
+
+	// Continue with remaining draws
+	remainingResult, err := e.DrawMultipleFromPrizes(ctx, lockKey, prizes, remainingCount, nil)
+	if err != nil && remainingResult == nil {
+		return nil, err
+	}
+
+	// Combine results
+	combinedResult := &MultiDrawResult{
+		PrizeResults:   append(savedState.PrizeResults, remainingResult.PrizeResults...),
+		TotalRequested: count,
+		Completed:      savedState.CompletedCount + remainingResult.Completed,
+		Failed:         remainingResult.Failed,
+		PartialSuccess: remainingResult.PartialSuccess || (savedState.CompletedCount > 0 && remainingResult.Failed > 0),
+		LastError:      remainingResult.LastError,
+		ErrorDetails:   remainingResult.ErrorDetails,
+	}
+
+	return combinedResult, err
+}
+
+// ResumeMultiDrawFromPrizes resumes a previously interrupted multi-draw prize operation
+func (e *LotteryEngine) ResumeMultiDrawFromPrizes(ctx context.Context, lockKey string, prizes []Prize, count int) (*MultiDrawResult, error) {
+	result, err := e.executeWithBreaker(func() (any, error) {
+		return e.resumeMultiDrawFromPrizes(ctx, lockKey, prizes, count)
+	})
+	if err != nil {
+		return nil, err
+	}
+
+	return result.(*MultiDrawResult), nil
+}
+
 // PerformanceMetrics 获取性能指标
 func (e *LotteryEngine) PerformanceMetrics() PerformanceMetrics {
 	return e.performanceMonitor.GetMetrics()
@@ -1179,6 +1400,194 @@ func (e *LotteryEngine) EnablePerformanceMonitoring() {
 // DisablePerformanceMonitoring 禁用性能监控
 func (e *LotteryEngine) DisablePerformanceMonitoring() {
 	e.performanceMonitor.Disable()
+}
+
+// EnableCircuitBreaker 启用熔断器
+func (e *LotteryEngine) EnableCircuitBreaker() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.configManager.config.CircuitBreaker.Enabled = true
+
+	if e.circuitBreaker == nil {
+		breaker := gobreaker.NewCircuitBreaker(gobreaker.Settings{
+			Name:        e.configManager.config.CircuitBreaker.Name,
+			MaxRequests: e.configManager.config.CircuitBreaker.MaxRequests,
+			Interval:    e.configManager.config.CircuitBreaker.Interval,
+			Timeout:     e.configManager.config.CircuitBreaker.Timeout,
+			ReadyToTrip: func(counts gobreaker.Counts) bool {
+				// 当请求数达到最小要求且失败率超过阈值时触发熔断
+				return counts.Requests >= e.configManager.config.CircuitBreaker.MinRequests &&
+					float64(counts.TotalFailures)/float64(counts.Requests) >= e.configManager.config.CircuitBreaker.FailureRatio
+			},
+			OnStateChange: func(name string, from, to gobreaker.State) {
+				if e.configManager.config.CircuitBreaker.OnStateChange && e.logger != nil {
+					e.logger.Info("Circuit breaker '%s' state changed from %s to %s", name, from, to)
+				}
+			},
+		})
+		e.circuitBreaker = breaker
+	}
+}
+
+// DisableCircuitBreaker 禁用熔断器
+func (e *LotteryEngine) DisableCircuitBreaker() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+
+	e.configManager.config.CircuitBreaker.Enabled = false
+}
+
+// GetCircuitBreakerState 获取熔断器状态
+func (e *LotteryEngine) GetCircuitBreakerState() string {
+	if e.circuitBreaker == nil {
+		return "disabled"
+	}
+
+	switch e.circuitBreaker.State() {
+	case gobreaker.StateClosed:
+		return "closed"
+	case gobreaker.StateHalfOpen:
+		return "half-open"
+	case gobreaker.StateOpen:
+		return "open"
+	default:
+		return "unknown"
+	}
+}
+
+// GetCircuitBreakerCounts 获取熔断器统计信息
+func (e *LotteryEngine) GetCircuitBreakerCounts() gobreaker.Counts {
+	if e.circuitBreaker == nil {
+		return gobreaker.Counts{}
+	}
+
+	return e.circuitBreaker.Counts()
+}
+
+// ResetCircuitBreaker 重置熔断器 (重新创建熔断器实例)
+func (e *LotteryEngine) ResetCircuitBreaker() {
+	if e.circuitBreaker != nil {
+		// gobreaker 没有 Reset 方法，我们重新创建一个实例
+		e.circuitBreaker = gobreaker.NewCircuitBreaker(gobreaker.Settings{
+			Name:        e.configManager.config.CircuitBreaker.Name,
+			MaxRequests: e.configManager.config.CircuitBreaker.MaxRequests,
+			Interval:    e.configManager.config.CircuitBreaker.Interval,
+			Timeout:     e.configManager.config.CircuitBreaker.Timeout,
+			ReadyToTrip: func(counts gobreaker.Counts) bool {
+				failureRatio := float64(counts.TotalFailures) / float64(counts.Requests)
+				return counts.Requests >= e.configManager.config.CircuitBreaker.MinRequests && failureRatio >= e.configManager.config.CircuitBreaker.FailureRatio
+			},
+			OnStateChange: func(name string, from, to gobreaker.State) {
+				if e.configManager.config.CircuitBreaker.OnStateChange && e.logger != nil {
+					e.logger.Info("Circuit breaker '%s' state changed from %s to %s", name, from, to)
+				}
+			},
+		})
+		if e.logger != nil {
+			e.logger.Info("Circuit breaker '%s' has been reset (recreated)", e.configManager.config.CircuitBreaker.Name)
+		}
+	}
+}
+
+func (e *LotteryEngine) CircuitBreakerHealthCheck() map[string]any {
+	result := map[string]any{
+		"circuit_breaker_enabled": e.configManager.config.CircuitBreaker.Enabled,
+	}
+
+	if e.configManager.config.CircuitBreaker.Enabled && e.configManager.config.CircuitBreaker != nil {
+		state := e.GetCircuitBreakerState()
+		counts := e.GetCircuitBreakerCounts()
+
+		result["state"] = state
+		result["requests"] = counts.Requests
+		result["total_successes"] = counts.TotalSuccesses
+		result["total_failures"] = counts.TotalFailures
+		result["consecutive_successes"] = counts.ConsecutiveSuccesses
+		result["consecutive_failures"] = counts.ConsecutiveFailures
+
+		// 计算成功率
+		if counts.Requests > 0 {
+			result["success_rate"] = float64(counts.TotalSuccesses) / float64(counts.Requests)
+			result["failure_rate"] = float64(counts.TotalFailures) / float64(counts.Requests)
+		} else {
+			result["success_rate"] = 0.0
+			result["failure_rate"] = 0.0
+		}
+
+		// 健康状态判断
+		healthy := true
+		switch state {
+		case "open":
+			healthy = false
+		case "half-open":
+			// 半开状态下，如果连续失败次数过多，认为不健康
+			if counts.ConsecutiveFailures > 2 {
+				healthy = false
+			}
+		}
+
+		result["healthy"] = healthy
+	} else {
+		result["state"] = "disabled"
+		result["healthy"] = true
+	}
+
+	return result
+}
+
+func (e *LotteryEngine) CircuitBreakerMetrics() map[string]any {
+	metrics := map[string]any{
+		"circuit_breaker_enabled": e.configManager.config.CircuitBreaker.Enabled,
+		"timestamp":               time.Now().Unix(),
+	}
+
+	if e.configManager.config.CircuitBreaker.Enabled && e.configManager.config.CircuitBreaker != nil {
+		stateToNumeric := func(state string) int {
+			switch state {
+			case "closed":
+				return 0
+			case "half-open":
+				return 1
+			case "open":
+				return 2
+			default:
+				return -1
+			}
+		}
+
+		state := e.GetCircuitBreakerState()
+		counts := e.GetCircuitBreakerCounts()
+
+		// 状态指标
+		metrics["circuit_breaker_state"] = state
+		metrics["circuit_breaker_state_numeric"] = stateToNumeric(state)
+
+		// 计数指标
+		metrics["circuit_breaker_requests_total"] = counts.Requests
+		metrics["circuit_breaker_successes_total"] = counts.TotalSuccesses
+		metrics["circuit_breaker_failures_total"] = counts.TotalFailures
+		metrics["circuit_breaker_consecutive_successes"] = counts.ConsecutiveSuccesses
+		metrics["circuit_breaker_consecutive_failures"] = counts.ConsecutiveFailures
+
+		// 比率指标
+		if counts.Requests > 0 {
+			metrics["circuit_breaker_success_rate"] = float64(counts.TotalSuccesses) / float64(counts.Requests)
+			metrics["circuit_breaker_failure_rate"] = float64(counts.TotalFailures) / float64(counts.Requests)
+		} else {
+			metrics["circuit_breaker_success_rate"] = 0.0
+			metrics["circuit_breaker_failure_rate"] = 0.0
+		}
+
+		// 配置指标
+		metrics["circuit_breaker_max_requests"] = e.configManager.config.CircuitBreaker.MaxRequests
+		metrics["circuit_breaker_failure_ratio_threshold"] = e.configManager.config.CircuitBreaker.FailureRatio
+		metrics["circuit_breaker_min_requests"] = e.configManager.config.CircuitBreaker.MinRequests
+		metrics["circuit_breaker_interval_seconds"] = e.configManager.config.CircuitBreaker.Interval.Seconds()
+		metrics["circuit_breaker_timeout_seconds"] = e.configManager.config.CircuitBreaker.Timeout.Seconds()
+	}
+
+	return metrics
 }
 
 // DrawInRangeWithMonitoring 带性能监控的范围抽奖

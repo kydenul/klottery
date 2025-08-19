@@ -48,19 +48,19 @@ const (
 	DefaultCircuitBreakerName = "lottery-engine"
 
 	// DefaultCircuitBreakerMaxRequests is the default max requests
-	DefaultCircuitBreakerMaxRequests = 3
+	DefaultCircuitBreakerMaxRequests = 5
 
 	// DefaultCircuitBreakerInterval is the default interval
-	DefaultCircuitBreakerInterval = 60 * time.Second
+	DefaultCircuitBreakerInterval = 30 * time.Second
 
 	// DefaultCircuitBreakerTimeout is the default timeout
-	DefaultCircuitBreakerTimeout = 30 * time.Second
+	DefaultCircuitBreakerTimeout = 10 * time.Second
 
 	// DefaultCircuitBreakerFailureRatio is the default failure ratio
-	DefaultCircuitBreakerFailureRatio = 0.6
+	DefaultCircuitBreakerFailureRatio = 0.5
 
 	// DefaultCircuitBreakerMinRequests is the default min requests
-	DefaultCircuitBreakerMinRequests = 3
+	DefaultCircuitBreakerMinRequests = 10
 
 	// DefaultCircuitBreakerOnStateChange is the default on state change
 	DefaultCircuitBreakerOnStateChange = true

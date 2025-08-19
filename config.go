@@ -192,6 +192,7 @@ func (cm *ConfigManager) setDefaults() {
 	cm.viper.SetDefault("lottery.lock_timeout", "30s")
 	cm.viper.SetDefault("lottery.retry_attempts", 3)
 	cm.viper.SetDefault("lottery.retry_interval", "100ms")
+	cm.viper.SetDefault("lottery.lock_cache_ttl", "1s")
 
 	// Redis 默认配置
 	cm.viper.SetDefault("redis.addr", "localhost:6379")

@@ -18,6 +18,7 @@ func TestLotteryEngine_SaveDrawState(t *testing.T) {
 
 	// Create lottery engine with mock Redis client
 	engine := NewLotteryEngine(db)
+	engine.DisableCircuitBreaker()
 	ctx := context.Background()
 
 	validState := &DrawState{
@@ -698,6 +699,7 @@ func TestLotteryEngine_RollbackMultiDraw(t *testing.T) {
 
 	// Create lottery engine with mock Redis client
 	engine := NewLotteryEngine(db)
+	engine.DisableCircuitBreaker()
 	ctx := context.Background()
 
 	validState := &DrawState{
