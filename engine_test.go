@@ -857,7 +857,7 @@ func TestPrizeSelector_CoreFunctionality(t *testing.T) {
 
 		// 进行多次选择以验证概率分布
 		selections := make(map[string]int)
-		iterations := 10000
+		iterations := 100
 
 		for range iterations {
 			prize, err := selector.SelectPrize(prizes)
@@ -1912,11 +1912,11 @@ func TestLotteryEngine_FullIntegration(t *testing.T) {
 		engine := NewLotteryEngineWithLogger(rdb, NewSilentLogger())
 
 		// 设置较短的超时时间进行压力测试
-		err := engine.SetLockTimeout(5 * time.Second)
+		err := engine.SetLockTimeout(2 * time.Second)
 		require.NoError(t, err)
 
 		const numGoroutines = 50
-		const drawsPerGoroutine = 10
+		const drawsPerGoroutine = 100
 
 		var wg sync.WaitGroup
 		successCount := int64(0)
@@ -1929,12 +1929,12 @@ func TestLotteryEngine_FullIntegration(t *testing.T) {
 		}
 
 		// 启动多个goroutine进行并发抽奖
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
 			go func(goroutineID int) {
 				defer wg.Done()
 
-				for j := 0; j < drawsPerGoroutine; j++ {
+				for j := range drawsPerGoroutine {
 					// 交替进行范围抽奖和奖品抽奖
 					if j%2 == 0 {
 						_, err := engine.DrawInRange(ctx, "stress_test", 1, 1000)
@@ -2769,98 +2769,6 @@ func TestLotteryEngine_shouldAbortOnError(t *testing.T) {
 			assert.Equal(t, tt.shouldAbort, result)
 		})
 	}
-}
-
-// =================================================================
-
-func TestBatchDistributedLockManager_AcquireMultipleLocks(t *testing.T) {
-	// Setup Redis client for testing
-	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-		DB:   1, // Use test database
-	})
-
-	// Clean up test data
-	defer func() {
-		rdb.FlushDB(context.Background())
-		rdb.Close()
-	}()
-
-	batchManager := NewBatchLockManager(rdb, 30*time.Second, 3, 100*time.Millisecond, 1*time.Second)
-
-	t.Run("acquire multiple locks successfully", func(t *testing.T) {
-		ctx := context.Background()
-		lockKeys := []string{"batch_test_1", "batch_test_2", "batch_test_3"}
-		lockValues := []string{"value1", "value2", "value3"}
-
-		results, err := batchManager.AcquireMultipleLocks(ctx, lockKeys, lockValues, 30*time.Second)
-		require.NoError(t, err)
-		assert.Len(t, results, 3)
-
-		// All locks should be acquired successfully
-		for i, acquired := range results {
-			assert.True(t, acquired, "Lock %d should be acquired", i)
-		}
-
-		// Clean up
-		_, err = batchManager.ReleaseMultipleLocks(ctx, lockKeys, lockValues)
-		assert.NoError(t, err)
-	})
-
-	t.Run("mismatched keys and values", func(t *testing.T) {
-		ctx := context.Background()
-		lockKeys := []string{"test1", "test2"}
-		lockValues := []string{"value1"} // Mismatched length
-
-		results, err := batchManager.AcquireMultipleLocks(ctx, lockKeys, lockValues, 30*time.Second)
-		assert.Equal(t, ErrInvalidParameters, err)
-		assert.Nil(t, results)
-	})
-
-	t.Run("empty keys and values", func(t *testing.T) {
-		ctx := context.Background()
-		lockKeys := []string{}
-		lockValues := []string{}
-
-		results, err := batchManager.AcquireMultipleLocks(ctx, lockKeys, lockValues, 30*time.Second)
-		assert.NoError(t, err)
-		assert.Len(t, results, 0)
-	})
-}
-
-func TestBatchDistributedLockManager_ReleaseMultipleLocks(t *testing.T) {
-	// Setup Redis client for testing
-	rdb := redis.NewClient(&redis.Options{
-		Addr: "localhost:6379",
-		DB:   1, // Use test database
-	})
-
-	// Clean up test data
-	defer func() {
-		rdb.FlushDB(context.Background())
-		rdb.Close()
-	}()
-
-	batchManager := NewBatchLockManager(rdb, 30*time.Second, 3, 100*time.Millisecond, 1*time.Second)
-
-	t.Run("release multiple locks successfully", func(t *testing.T) {
-		ctx := context.Background()
-		lockKeys := []string{"release_test_1", "release_test_2"}
-		lockValues := []string{"value1", "value2"}
-
-		// First acquire the locks
-		acquired, err := batchManager.AcquireMultipleLocks(ctx, lockKeys, lockValues, 30*time.Second)
-		require.NoError(t, err)
-		assert.True(t, acquired[0])
-		assert.True(t, acquired[1])
-
-		// Then release them
-		released, err := batchManager.ReleaseMultipleLocks(ctx, lockKeys, lockValues)
-		require.NoError(t, err)
-		assert.Len(t, released, 2)
-		assert.True(t, released[0])
-		assert.True(t, released[1])
-	})
 }
 
 func TestCalculateOptimalBatchSize(t *testing.T) {

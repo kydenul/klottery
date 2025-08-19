@@ -80,3 +80,20 @@ const (
 	DefaultRedisClusterMode  = false
 	DefaultRedisTLSEnabled   = false
 )
+
+const (
+	// StateKeyPrefix is the prefix for Redis state persistence keys
+	StateKeyPrefix = "lottery:state:"
+
+	// DefaultStateTTL is the default TTL for persisted state (1 hour)
+	DefaultStateTTL = 1 * time.Hour
+
+	// DefaultMaxSerializationMB is the maximum allowed size (10MB)
+	DefaultMaxSerializationMB = 10
+
+	// OperationIDLength is the length of the operation ID in bytes
+	OperationIDLength = 8
+
+	// MaxSerializationSize is the maximum allowed size for serialized DrawState (10MB)
+	MaxSerializationSize = 10 * 1024 * 1024
+)

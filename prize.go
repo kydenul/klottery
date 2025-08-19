@@ -6,6 +6,11 @@ type Prize struct {
 	Name        string  `json:"name"`        // Prize name
 	Probability float64 `json:"probability"` // Winning probability (0-1)
 	Value       int     `json:"value"`       // Prize value
+
+	// TODO: Add support the number of prizes
+	// Number int // Prize number
+	// TODO: Add default prize
+	// DefaultID string // Default prize
 }
 
 // Validate validates the prize data
@@ -97,7 +102,6 @@ func (ps *DefaultPrizeSelector) CalculateCumulativeProbabilities(prizes []Prize)
 
 	cumulativeProbabilities := make([]float64, len(prizes))
 	var cumulative float64
-
 	for i, prize := range prizes {
 		if prize.Probability < 0 || prize.Probability > 1 {
 			return nil, ErrInvalidProbability

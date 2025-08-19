@@ -12,25 +12,50 @@ import (
 	"github.com/go-redis/redis/v8"
 )
 
-const (
-	// StateKeyPrefix is the prefix for Redis state persistence keys
-	StateKeyPrefix = "lottery:state:"
+// DrawState represents the current state of a multi-draw operation
+type DrawState struct {
+	LockKey        string      `json:"lock_key"`                // The lock key being used
+	TotalCount     int         `json:"total_count"`             // Total number of draws requested
+	CompletedCount int         `json:"completed_count"`         // Number of draws completed
+	Results        []int       `json:"results,omitempty"`       // Range draw results so far
+	PrizeResults   []*Prize    `json:"prize_results,omitempty"` // Prize draw results so far
+	Errors         []DrawError `json:"errors,omitempty"`        // Errors encountered so far
+	StartTime      int64       `json:"start_time"`              // When the operation started
+	LastUpdateTime int64       `json:"last_update_time"`        // When the state was last updated
+}
 
-	// DefaultStateTTL is the default TTL for persisted state (1 hour)
-	DefaultStateTTL = 1 * time.Hour
+// Validate validates the draw state data
+func (ds *DrawState) Validate() error {
+	if ds.LockKey == "" {
+		return ErrInvalidParameters
+	}
+	if ds.TotalCount <= 0 {
+		return ErrInvalidCount
+	}
+	if ds.CompletedCount < 0 || ds.CompletedCount > ds.TotalCount {
+		return ErrInvalidParameters
+	}
+	if ds.StartTime <= 0 {
+		return ErrInvalidParameters
+	}
+	return nil
+}
 
-	// DefaultMaxSerializationMB is the maximum allowed size (10MB)
-	DefaultMaxSerializationMB = 10
+// IsComplete returns true if all draws have been completed
+func (ds *DrawState) IsComplete() bool {
+	return ds.CompletedCount >= ds.TotalCount
+}
 
-	// OperationIDLength is the length of the operation ID in bytes
-	OperationIDLength = 8
+// Progress returns the completion progress as a percentage
+func (ds *DrawState) Progress() float64 {
+	if ds.TotalCount == 0 {
+		return 0.0
+	}
+	return float64(ds.CompletedCount) / float64(ds.TotalCount) * 100.0
+}
 
-	// MaxSerializationSize is the maximum allowed size for serialized DrawState (10MB)
-	MaxSerializationSize = 10 * 1024 * 1024
-)
-
-// StatePersistenceManager handles Redis operations for state management
-type StatePersistenceManager struct {
+// DrawStateManager handles Redis operations for state management
+type DrawStateManager struct {
 	redisClient    *redis.Client
 	logger         Logger
 	retryAttempts  int
@@ -38,8 +63,8 @@ type StatePersistenceManager struct {
 }
 
 // NewStatePersistenceManager creates a new state persistence manager
-func NewStatePersistenceManager(redisClient *redis.Client, logger Logger) *StatePersistenceManager {
-	return &StatePersistenceManager{
+func NewStatePersistenceManager(redisClient *redis.Client, logger Logger) *DrawStateManager {
+	return &DrawStateManager{
 		redisClient:    redisClient,
 		logger:         logger,
 		retryAttempts:  DefaultRetryAttempts,
@@ -48,8 +73,8 @@ func NewStatePersistenceManager(redisClient *redis.Client, logger Logger) *State
 }
 
 // NewStatePersistenceManagerWithRetry creates a new state persistence manager with custom retry settings
-func NewStatePersistenceManagerWithRetry(redisClient *redis.Client, logger Logger, retryAttempts int, retryDelay time.Duration) *StatePersistenceManager {
-	return &StatePersistenceManager{
+func NewStatePersistenceManagerWithRetry(redisClient *redis.Client, logger Logger, retryAttempts int, retryDelay time.Duration) *DrawStateManager {
+	return &DrawStateManager{
 		redisClient:    redisClient,
 		logger:         logger,
 		retryAttempts:  retryAttempts,
@@ -123,7 +148,7 @@ func isRetriableRedisError(err error) bool {
 }
 
 // executeWithRetry executes a Redis operation with retry logic using exponential backoff
-func (spm *StatePersistenceManager) executeWithRetry(ctx context.Context, operation string, fn func() error) error {
+func (spm *DrawStateManager) executeWithRetry(ctx context.Context, operation string, fn func() error) error {
 	var lastErr error
 	startTime := time.Now()
 
@@ -262,7 +287,7 @@ func parseStateKey(key string) (lockKey string, operationID string, err error) {
 }
 
 // saveState saves a DrawState to Redis with TTL
-func (spm *StatePersistenceManager) saveState(ctx context.Context, key string, state *DrawState, ttl time.Duration) error {
+func (spm *DrawStateManager) saveState(ctx context.Context, key string, state *DrawState, ttl time.Duration) error {
 	if key == "" {
 		return fmt.Errorf("invalid parameters: empty key provided for saveState operation")
 	}
@@ -304,7 +329,7 @@ func (spm *StatePersistenceManager) saveState(ctx context.Context, key string, s
 }
 
 // loadState loads a DrawState from Redis
-func (spm *StatePersistenceManager) loadState(ctx context.Context, key string) (*DrawState, error) {
+func (spm *DrawStateManager) loadState(ctx context.Context, key string) (*DrawState, error) {
 	if key == "" {
 		return nil, fmt.Errorf("invalid parameters: empty key provided for loadState operation")
 	}
@@ -366,7 +391,7 @@ func (spm *StatePersistenceManager) loadState(ctx context.Context, key string) (
 }
 
 // deleteState removes a DrawState from Redis
-func (spm *StatePersistenceManager) deleteState(ctx context.Context, key string) error {
+func (spm *DrawStateManager) deleteState(ctx context.Context, key string) error {
 	if key == "" {
 		return fmt.Errorf("invalid parameters: empty key provided for deleteState operation")
 	}
@@ -399,7 +424,7 @@ func (spm *StatePersistenceManager) deleteState(ctx context.Context, key string)
 }
 
 // findStateKeys finds all state keys for a given lock key pattern
-func (spm *StatePersistenceManager) findStateKeys(ctx context.Context, lockKey string) ([]string, error) {
+func (spm *DrawStateManager) findStateKeys(ctx context.Context, lockKey string) ([]string, error) {
 	if lockKey == "" {
 		return nil, fmt.Errorf("invalid parameters: empty lockKey provided for findStateKeys operation")
 	}
@@ -425,7 +450,7 @@ func (spm *StatePersistenceManager) findStateKeys(ctx context.Context, lockKey s
 }
 
 // cleanupExpiredStates removes expired state keys (utility function for maintenance)
-func (spm *StatePersistenceManager) cleanupExpiredStates(ctx context.Context, lockKey string) error {
+func (spm *DrawStateManager) cleanupExpiredStates(ctx context.Context, lockKey string) error {
 	keys, err := spm.findStateKeys(ctx, lockKey)
 	if err != nil {
 		return err
