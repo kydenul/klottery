@@ -18,79 +18,84 @@ import (
 func main() {
 	fmt.Println("=== 生产环境就绪的抽奖系统示例 ===")
 
-	// 1. 初始化配置管理器
-	configManager := lottery.NewConfigManager()
-
-	// 加载配置
-	config, err := configManager.LoadConfig()
-	if err != nil {
-		log.Fatalf("Failed to load config: %v", err)
-	}
-
-	fmt.Printf("✓ 配置加载成功，环境: %s\n", getEnvironment())
-
-	// 2. 创建 Redis 客户端
-	redisClient := lottery.NewRedisClientFromConfig(config.Redis)
+	// 1. 创建生产级 Redis 客户端配置
+	redisClient := redis.NewClient(&redis.Options{
+		Addr:         getRedisAddr(),
+		Password:     getRedisPassword(),
+		DB:           getRedisDB(),
+		PoolSize:     20,               // 连接池大小
+		MinIdleConns: 10,               // 最小空闲连接
+		MaxRetries:   5,                // 最大重试次数
+		DialTimeout:  10 * time.Second, // 连接超时
+		ReadTimeout:  5 * time.Second,  // 读超时
+		WriteTimeout: 5 * time.Second,  // 写超时
+		PoolTimeout:  6 * time.Second,  // 连接池超时
+	})
 	defer redisClient.Close()
 
 	// 测试 Redis 连接
 	ctx := context.Background()
-	_, err = redisClient.Ping(ctx).Result()
+	_, err := redisClient.Ping(ctx).Result()
 	if err != nil {
 		log.Fatalf("Redis connection failed: %v", err)
 	}
 	fmt.Println("✓ Redis 连接成功")
 
+	// 2. 创建生产级配置管理器
+	configManager := lottery.NewDefaultConfigManager()
+	config := configManager.GetConfig()
+
+	// 设置生产环境配置
+	config.Engine.LockTimeout = 30 * time.Second
+	config.Engine.RetryAttempts = 5
+	config.Engine.RetryInterval = 200 * time.Millisecond
+	config.Engine.LockCacheTTL = 2 * time.Second
+
+	// 启用熔断器
+	config.CircuitBreaker.Enabled = true
+	config.CircuitBreaker.Name = "lottery-circuit-breaker"
+	config.CircuitBreaker.MaxRequests = 100
+	config.CircuitBreaker.Interval = 60 * time.Second
+	config.CircuitBreaker.Timeout = 30 * time.Second
+	config.CircuitBreaker.MinRequests = 10
+	config.CircuitBreaker.FailureRatio = 0.5
+	config.CircuitBreaker.OnStateChange = true
+
+	fmt.Printf("✓ 配置加载成功，环境: %s\n", getEnvironment())
+
 	// 3. 创建抽奖引擎
-	lotteryConfig, err := lottery.NewLotteryConfigFromConfig(config)
-	if err != nil {
-		log.Fatalf("Failed to create lottery config: %v", err)
-	}
-	engine := lottery.NewLotteryEngineWithConfig(redisClient, lotteryConfig)
+	engine := lottery.NewLotteryEngineWithConfig(redisClient, configManager)
 
-	// 4. 创建错误处理器
-	errorHandler := lottery.NewDefaultErrorHandler(engine.GetLogger())
-	errorRecovery := lottery.NewErrorRecovery(errorHandler, config.Engine.RetryAttempts, engine.GetLogger())
+	// 设置生产级日志记录器
+	logger := &ProductionLogger{env: getEnvironment()}
+	engine.SetLogger(logger)
 
-	// 5. 设置配置热更新监听
-	err = configManager.WatchConfig(func(newConfig *lottery.Config) {
-		fmt.Printf("⚡ 配置已更新: %+v\n", newConfig)
-		// 这里可以更新引擎配置
-	})
-	if err != nil {
-		log.Printf("Failed to watch config: %v", err)
-	}
+	fmt.Println("✓ 抽奖引擎创建成功")
 
-	// 6. 运行示例
-	runProductionExamples(ctx, engine, errorRecovery, config)
+	// 4. 运行生产环境示例
+	runProductionExamples(ctx, engine, config)
 
-	// 7. 优雅关闭
-	gracefulShutdown(redisClient)
+	// 5. 启动健康检查和监控
+	startHealthCheck(ctx, engine, redisClient)
+
+	// 6. 优雅关闭
+	gracefulShutdown(redisClient, engine)
 }
 
 // runProductionExamples 运行生产环境示例
-func runProductionExamples(
-	ctx context.Context,
-	engine lottery.LotteryDrawer,
-	recovery *lottery.ErrorRecovery,
-	config *lottery.Config,
-) {
+func runProductionExamples(ctx context.Context, engine *lottery.LotteryEngine, config *lottery.Config) {
 	fmt.Println("\n--- 生产环境抽奖示例 ---")
 
 	// 示例1: 带错误恢复的范围抽奖
 	fmt.Println("\n1. 带错误恢复的范围抽奖")
-	err := recovery.ExecuteWithRetry(ctx, func() error {
-		result, err := engine.DrawInRange(ctx, "prod:user:123", 1, 1000)
-		if err != nil {
-			return err
-		}
-		fmt.Printf("   抽奖结果: %d\n", result)
-		return nil
-	})
+	result, err := performWithRetry(ctx, func() (any, error) {
+		return engine.DrawInRange(ctx, "prod:user:123", 1, 1000)
+	}, 3)
+
 	if err != nil {
 		fmt.Printf("   ❌ 抽奖失败: %v\n", err)
 	} else {
-		fmt.Println("   ✓ 抽奖成功")
+		fmt.Printf("   ✓ 抽奖成功: %d\n", result.(int))
 	}
 
 	// 示例2: 高并发奖品池抽奖
@@ -109,16 +114,11 @@ func runProductionExamples(
 
 	for i := range concurrentDraws {
 		go func(index int) {
-			err := recovery.ExecuteWithRetry(ctx, func() error {
-				prize, err := engine.DrawFromPrizes(ctx, fmt.Sprintf("prod:activity:concurrent_%d", index), prizes)
-				if err != nil {
-					return err
-				}
-				results <- prize
-				return nil
-			})
+			prize, err := engine.DrawFromPrizes(ctx, fmt.Sprintf("prod:activity:concurrent_%d", index), prizes)
 			if err != nil {
 				errors <- err
+			} else {
+				results <- prize
 			}
 		}(i)
 	}
@@ -134,7 +134,7 @@ func runProductionExamples(
 		case err := <-errors:
 			errorCount++
 			fmt.Printf("   ❌ 并发抽奖失败 %d: %v\n", errorCount, err)
-		case <-time.After(5 * time.Second):
+		case <-time.After(10 * time.Second):
 			fmt.Printf("   ⏰ 并发抽奖超时\n")
 			return
 		}
@@ -144,52 +144,137 @@ func runProductionExamples(
 
 	// 示例3: 带状态恢复的批量抽奖
 	fmt.Println("\n3. 带状态恢复的批量抽奖")
-	err = recovery.ExecuteWithRetry(ctx, func() error {
-		result, err := engine.DrawMultipleInRange(ctx, "prod:batch:recovery", 1, 100, 20, nil)
-		if err != nil {
-			return err
+
+	// 定义进度回调
+	progressCallback := func(completed, total int, currentResult any) {
+		if completed%5 == 0 || completed == total {
+			progress := float64(completed) / float64(total) * 100
+			fmt.Printf("   进度: %.1f%% (%d/%d)\n", progress, completed, total)
 		}
+	}
 
-		fmt.Printf("   批量抽奖完成: 总数 %d, 成功 %d, 失败 %d\n",
-			result.TotalRequested, result.Completed, result.Failed)
-
-		if len(result.Results) > 0 {
-			fmt.Printf("   前5个结果: %v\n", result.Results[:min(5, len(result.Results))])
-		}
-
-		return nil
-	})
+	batchResult, err := engine.DrawMultipleInRange(ctx, "prod:batch:recovery", 1, 100, 20, progressCallback)
 	if err != nil {
-		fmt.Printf("   ❌ 批量抽奖失败: %v\n", err)
+		if batchResult != nil && batchResult.PartialSuccess {
+			fmt.Printf("   ⚠️ 批量抽奖部分成功: 总数 %d, 成功 %d, 失败 %d\n",
+				batchResult.TotalRequested, batchResult.Completed, batchResult.Failed)
+		} else {
+			fmt.Printf("   ❌ 批量抽奖失败: %v\n", err)
+		}
 	} else {
-		fmt.Println("   ✓ 批量抽奖成功")
+		fmt.Printf("   ✓ 批量抽奖完成: 总数 %d, 成功 %d\n",
+			batchResult.TotalRequested, batchResult.Completed)
+
+		if len(batchResult.Results) > 0 {
+			fmt.Printf("   前5个结果: %v\n", batchResult.Results[:min(5, len(batchResult.Results))])
+		}
 	}
 
 	// 示例4: 熔断器状态监控
 	fmt.Println("\n4. 熔断器状态监控")
-	if engine, ok := engine.(*lottery.LotteryEngine); ok {
-		state := engine.GetCircuitBreakerState()
-		counts := engine.GetCircuitBreakerCounts()
+	state := engine.GetCircuitBreakerState()
+	counts := engine.GetCircuitBreakerCounts()
 
-		fmt.Printf("   熔断器状态: %s\n", state)
-		fmt.Printf("   请求统计: 总数 %d, 成功 %d, 失败 %d\n",
-			counts.Requests, counts.TotalSuccesses, counts.TotalFailures)
+	fmt.Printf("   熔断器状态: %s\n", state)
+	fmt.Printf("   请求统计: 总数 %d, 成功 %d, 失败 %d\n",
+		counts.Requests, counts.TotalSuccesses, counts.TotalFailures)
 
-		if counts.Requests > 0 {
-			successRate := float64(counts.TotalSuccesses) / float64(counts.Requests) * 100
-			fmt.Printf("   成功率: %.2f%%\n", successRate)
+	if counts.Requests > 0 {
+		successRate := float64(counts.TotalSuccesses) / float64(counts.Requests) * 100
+		fmt.Printf("   成功率: %.2f%%\n", successRate)
+	}
+
+	// 示例5: 性能监控
+	fmt.Println("\n5. 性能监控")
+	metrics := engine.PerformanceMetrics()
+	fmt.Printf("   总抽奖次数: %d\n", metrics.TotalDraws)
+	fmt.Printf("   成功次数: %d\n", metrics.SuccessfulDraws)
+	fmt.Printf("   失败次数: %d\n", metrics.FailedDraws)
+	if metrics.TotalDraws > 0 {
+		successRate := float64(metrics.SuccessfulDraws) / float64(metrics.TotalDraws) * 100
+		fmt.Printf("   成功率: %.2f%%\n", successRate)
+	}
+
+	// 示例6: 配置信息展示
+	fmt.Println("\n6. 当前配置信息")
+	currentConfig := engine.GetConfig()
+	fmt.Printf("   锁超时: %v\n", currentConfig.Engine.LockTimeout)
+	fmt.Printf("   重试次数: %d\n", currentConfig.Engine.RetryAttempts)
+	fmt.Printf("   重试间隔: %v\n", currentConfig.Engine.RetryInterval)
+	fmt.Printf("   熔断器启用: %t\n", currentConfig.CircuitBreaker.Enabled)
+}
+
+// startHealthCheck 启动健康检查
+func startHealthCheck(ctx context.Context, engine *lottery.LotteryEngine, redisClient *redis.Client) {
+	fmt.Println("\n--- 健康检查 ---")
+
+	// Redis 健康检查
+	_, err := redisClient.Ping(ctx).Result()
+	if err != nil {
+		fmt.Printf("❌ Redis 健康检查失败: %v\n", err)
+	} else {
+		fmt.Println("✓ Redis 健康检查通过")
+	}
+
+	// 熔断器健康检查
+	healthCheck := engine.CircuitBreakerHealthCheck()
+	if healthy, ok := healthCheck["healthy"].(bool); ok && healthy {
+		fmt.Println("✓ 熔断器健康检查通过")
+	} else {
+		fmt.Printf("⚠️ 熔断器健康检查异常: %+v\n", healthCheck)
+	}
+
+	// 简单的功能测试
+	testResult, err := engine.DrawInRange(ctx, "health_check", 1, 10)
+	if err != nil {
+		fmt.Printf("❌ 功能健康检查失败: %v\n", err)
+	} else {
+		fmt.Printf("✓ 功能健康检查通过: %d\n", testResult)
+	}
+}
+
+// performWithRetry 执行重试逻辑
+func performWithRetry(ctx context.Context, operation func() (any, error), maxRetries int) (any, error) {
+	var lastErr error
+
+	for i := 0; i < maxRetries; i++ {
+		result, err := operation()
+		if err == nil {
+			return result, nil
+		}
+
+		lastErr = err
+		if i < maxRetries-1 {
+			// 指数退避
+			backoff := time.Duration(i+1) * 100 * time.Millisecond
+			time.Sleep(backoff)
 		}
 	}
 
-	// 示例5: 配置信息展示
-	fmt.Println("\n5. 当前配置信息")
-	fmt.Printf("   锁超时: %v\n", config.Engine.LockTimeout)
-	fmt.Printf("   重试次数: %d\n", config.Engine.RetryAttempts)
-	fmt.Printf("   重试间隔: %v\n", config.Engine.RetryInterval)
-	fmt.Printf("   熔断器启用: %t\n", config.CircuitBreaker.Enabled)
+	return nil, lastErr
 }
 
-// getEnvironment 获取当前环境
+// ProductionLogger 生产环境日志记录器
+type ProductionLogger struct {
+	env string
+}
+
+func (l *ProductionLogger) Info(msg string, args ...any) {
+	log.Printf("[%s] [INFO] "+msg, append([]any{l.env}, args...)...)
+}
+
+func (l *ProductionLogger) Error(msg string, args ...any) {
+	log.Printf("[%s] [ERROR] "+msg, append([]any{l.env}, args...)...)
+}
+
+func (l *ProductionLogger) Debug(msg string, args ...any) {
+	// 生产环境可以选择性地记录调试日志
+	if l.env == "development" {
+		log.Printf("[%s] [DEBUG] "+msg, append([]any{l.env}, args...)...)
+	}
+}
+
+// 环境配置获取函数
 func getEnvironment() string {
 	env := os.Getenv("LOTTERY_ENV")
 	if env == "" {
@@ -198,16 +283,25 @@ func getEnvironment() string {
 	return env
 }
 
-// min 返回两个整数中的较小值
-func min(a, b int) int {
-	if a < b {
-		return a
+func getRedisAddr() string {
+	addr := os.Getenv("REDIS_ADDR")
+	if addr == "" {
+		addr = "localhost:6379"
 	}
-	return b
+	return addr
+}
+
+func getRedisPassword() string {
+	return os.Getenv("REDIS_PASSWORD")
+}
+
+func getRedisDB() int {
+	// 简化处理，实际生产环境可能需要更复杂的配置解析
+	return 0
 }
 
 // gracefulShutdown 优雅关闭
-func gracefulShutdown(redisClient *redis.Client) {
+func gracefulShutdown(redisClient *redis.Client, engine *lottery.LotteryEngine) {
 	fmt.Println("\n--- 等待关闭信号 ---")
 
 	// 创建信号通道
@@ -221,6 +315,13 @@ func gracefulShutdown(redisClient *redis.Client) {
 	// 创建关闭超时上下文
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// 显示最终统计信息
+	fmt.Println("\n--- 最终统计信息 ---")
+	metrics := engine.PerformanceMetrics()
+	fmt.Printf("总抽奖次数: %d\n", metrics.TotalDraws)
+	fmt.Printf("成功次数: %d\n", metrics.SuccessfulDraws)
+	fmt.Printf("失败次数: %d\n", metrics.FailedDraws)
 
 	// 关闭 Redis 连接
 	if err := redisClient.Close(); err != nil {

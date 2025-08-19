@@ -42,8 +42,8 @@ func main() {
 	fmt.Println("\n--- 基础奖品池抽奖 ---")
 	basicPrizeExample(ctx, engine)
 
-	// 5. 连续抽奖示例
-	fmt.Println("\n--- 连续抽奖示例 ---")
+	// 5. 批量抽奖示例
+	fmt.Println("\n--- 批量抽奖示例 ---")
 	multipleDrawExample(ctx, engine)
 
 	fmt.Println("\n=== 基础示例演示完成 ===")
@@ -87,17 +87,21 @@ func basicPrizeExample(ctx context.Context, engine *lottery.LotteryEngine) {
 	fmt.Printf("✓ 中奖结果: %s (价值: %d)\n", prize.Name, prize.Value)
 }
 
-// 连续抽奖示例
+// 批量抽奖示例
 func multipleDrawExample(ctx context.Context, engine *lottery.LotteryEngine) {
-	// 连续范围抽奖
+	// 批量范围抽奖
 	results, err := engine.DrawMultipleInRange(ctx, "user:multi_demo", 1, 20, 5, nil)
 	if err != nil {
-		fmt.Printf("❌ 连续抽奖失败: %v\n", err)
+		fmt.Printf("❌ 批量抽奖失败: %v\n", err)
+		if results != nil && results.PartialSuccess {
+			fmt.Printf("  部分成功: %d/%d 次成功\n", results.Completed, results.TotalRequested)
+			fmt.Printf("  成功结果: %v\n", results.Results)
+		}
 		return
 	}
-	fmt.Printf("✓ 连续抽奖结果 (5次): %v\n", results)
+	fmt.Printf("✓ 批量抽奖结果 (5次): %v\n", results.Results)
 
-	// 连续奖品抽奖
+	// 批量奖品抽奖
 	prizes := []lottery.Prize{
 		{ID: "gold", Name: "金币", Probability: 0.3, Value: 100},
 		{ID: "silver", Name: "银币", Probability: 0.4, Value: 50},
@@ -106,11 +110,14 @@ func multipleDrawExample(ctx context.Context, engine *lottery.LotteryEngine) {
 
 	prizeResults, err := engine.DrawMultipleFromPrizes(ctx, "activity:multi_demo", prizes, 3, nil)
 	if err != nil {
-		fmt.Printf("❌ 连续奖品抽奖失败: %v\n", err)
+		fmt.Printf("❌ 批量奖品抽奖失败: %v\n", err)
+		if prizeResults != nil && prizeResults.PartialSuccess {
+			fmt.Printf("  部分成功: %d/%d 次成功\n", prizeResults.Completed, prizeResults.TotalRequested)
+		}
 		return
 	}
 
-	fmt.Printf("✓ 连续奖品抽奖结果 (3次):\n")
+	fmt.Printf("✓ 批量奖品抽奖结果 (3次):\n")
 	for i, prize := range prizeResults.PrizeResults {
 		fmt.Printf("  第%d次: %s (价值: %d)\n", i+1, prize.Name, prize.Value)
 	}

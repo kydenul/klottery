@@ -48,22 +48,20 @@ func main() {
 
 // 自定义配置示例
 func customConfigExample(ctx context.Context, rdb *redis.Client) {
-	// 创建自定义配置
-	config, err := lottery.NewLotteryConfig(
-		10*time.Second,       // 锁超时时间
-		5,                    // 重试次数
-		200*time.Millisecond, // 重试间隔
-		1*time.Second,        // Lock Cache TTL
-	)
-	if err != nil {
-		fmt.Printf("❌ 配置创建失败: %v\n", err)
-		return
-	}
+	// 创建自定义配置管理器
+	configManager := lottery.NewDefaultConfigManager()
+
+	// 获取配置并修改
+	config := configManager.GetConfig()
+	config.Engine.LockTimeout = 10 * time.Second
+	config.Engine.RetryAttempts = 5
+	config.Engine.RetryInterval = 200 * time.Millisecond
+	config.Engine.LockCacheTTL = 1 * time.Second
 
 	// 使用自定义配置创建引擎
-	engine := lottery.NewLotteryEngineWithConfig(rdb, config)
+	engine := lottery.NewLotteryEngineWithConfig(rdb, configManager)
 	fmt.Printf("✓ 自定义配置引擎创建成功 (锁超时: %v, 重试: %d次)\n",
-		config.GetConfig().Engine.LockTimeout, config.GetConfig().Engine.RetryAttempts)
+		config.Engine.LockTimeout, config.Engine.RetryAttempts)
 
 	// 测试抽奖
 	result, err := engine.DrawInRange(ctx, "custom_config_demo", 1, 100)
@@ -83,8 +81,9 @@ func errorRecoveryExample(ctx context.Context, rdb *redis.Client) {
 
 	if err != nil {
 		if result != nil && result.PartialSuccess {
+			successRate := float64(result.Completed) / float64(result.TotalRequested) * 100
 			fmt.Printf("⚠️  部分成功: 完成 %d/%d 次抽奖 (成功率: %.1f%%)\n",
-				result.Completed, result.TotalRequested, result.SuccessRate())
+				result.Completed, result.TotalRequested, successRate)
 			fmt.Printf("   成功结果: %v\n", result.Results)
 
 			// 显示错误详情

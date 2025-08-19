@@ -28,8 +28,9 @@ func main() {
 	result, err := engine.DrawMultipleInRange(ctx, "enhanced_demo_1", 1, 100, 10, nil)
 	if err != nil {
 		if result != nil && result.PartialSuccess {
-			fmt.Printf("部分成功: 完成 %d/%d 次抽奖\n", result.Completed, result.TotalRequested)
-			fmt.Printf("成功率: %.1f%%\n", result.SuccessRate())
+			successRate := float64(result.Completed) / float64(result.TotalRequested) * 100
+			fmt.Printf("部分成功: 完成 %d/%d 次抽奖 (成功率: %.1f%%)\n",
+				result.Completed, result.TotalRequested, successRate)
 			fmt.Printf("结果: %v\n", result.Results)
 		} else {
 			fmt.Printf("抽奖失败: %v\n", err)
@@ -112,7 +113,8 @@ func main() {
 		LastUpdateTime: time.Now().Unix(),
 	}
 
-	fmt.Printf("保存状态: 进度 %.1f%% (%d/%d)\n", drawState.Progress(), drawState.CompletedCount, drawState.TotalCount)
+	progress := float64(drawState.CompletedCount) / float64(drawState.TotalCount) * 100
+	fmt.Printf("保存状态: 进度 %.1f%% (%d/%d)\n", progress, drawState.CompletedCount, drawState.TotalCount)
 
 	err = engine.SaveDrawState(ctx, drawState)
 	if err != nil {
@@ -126,9 +128,23 @@ func main() {
 	if err != nil {
 		fmt.Printf("加载状态失败: %v\n", err)
 	} else if loadedState == nil {
-		fmt.Printf("未找到保存的状态（这是预期的，因为当前实现是占位符）\n")
+		fmt.Printf("未找到保存的状态\n")
 	} else {
-		fmt.Printf("加载状态成功: 进度 %.1f%%\n", loadedState.Progress())
+		loadedProgress := float64(loadedState.CompletedCount) / float64(loadedState.TotalCount) * 100
+		fmt.Printf("加载状态成功: 进度 %.1f%%\n", loadedProgress)
+	}
+
+	// 示例6：恢复中断的抽奖
+	fmt.Println("\n6. 恢复中断的抽奖演示:")
+
+	resumeResult, err := engine.ResumeMultiDrawInRange(ctx, "resume_demo", 1, 100, 15)
+	if err != nil {
+		fmt.Printf("恢复抽奖失败: %v\n", err)
+	} else {
+		fmt.Printf("恢复抽奖成功: 完成 %d/%d 次\n", resumeResult.Completed, resumeResult.TotalRequested)
+		if len(resumeResult.Results) > 0 {
+			fmt.Printf("结果: %v\n", resumeResult.Results)
+		}
 	}
 
 	fmt.Println("\n=== 增强功能演示完成 ===")

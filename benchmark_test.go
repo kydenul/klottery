@@ -46,7 +46,7 @@ func BenchmarkSingleDraw(b *testing.B) {
 
 	b.Run("范围抽奖", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; b.Loop(); i++ {
+		for i := 0; i < b.N; i++ {
 			lockKey := fmt.Sprintf("single_range_%d", i)
 			_, err := engine.DrawInRange(ctx, lockKey, 1, 1000)
 			if err != nil {
@@ -64,7 +64,7 @@ func BenchmarkSingleDraw(b *testing.B) {
 		}
 
 		b.ResetTimer()
-		for i := 0; b.Loop(); i++ {
+		for i := 0; i < b.N; i++ {
 			lockKey := fmt.Sprintf("single_prize_%d", i)
 			_, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
 			if err != nil {
@@ -104,7 +104,7 @@ func BenchmarkMultipleDraw(b *testing.B) {
 	for _, tc := range testCases {
 		b.Run(fmt.Sprintf("范围抽奖_%s", tc.name), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; b.Loop(); i++ {
+			for i := 0; i < b.N; i++ {
 				lockKey := fmt.Sprintf("multi_range_%s_%d", tc.name, i)
 				_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, tc.count, nil)
 				if err != nil {
@@ -122,7 +122,7 @@ func BenchmarkMultipleDraw(b *testing.B) {
 			}
 
 			b.ResetTimer()
-			for i := 0; b.Loop(); i++ {
+			for i := 0; i < b.N; i++ {
 				lockKey := fmt.Sprintf("multi_prize_%s_%d", tc.name, i)
 				_, err := engine.DrawMultipleFromPrizes(ctx, lockKey, prizes, tc.count, nil)
 				if err != nil {
@@ -147,7 +147,11 @@ func BenchmarkConcurrentDraw(b *testing.B) {
 		b.Skip("Redis不可用，跳过基准测试")
 	}
 
-	engine := NewLotteryEngineWithLogger(rdb, NewSilentLogger())
+	// 创建一个自定义配置，禁用熔断器
+	config := NewDefaultConfigManager()
+	config.config.CircuitBreaker.Enabled = false // 禁用熔断器，避免高并发测试触发熔断
+
+	engine := NewLotteryEngineWithConfigAndLogger(rdb, config, NewSilentLogger())
 
 	concurrencyLevels := []int{10, 50, 100, 200}
 
@@ -217,7 +221,7 @@ func BenchmarkOptimizedVsStandard(b *testing.B) {
 	for _, count := range drawCounts {
 		b.Run(fmt.Sprintf("标准版本_%d次抽奖", count), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; b.Loop(); i++ {
+			for i := 0; i < b.N; i++ {
 				lockKey := fmt.Sprintf("standard_%d_%d", count, i)
 				_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, count, nil)
 				if err != nil {
@@ -228,7 +232,7 @@ func BenchmarkOptimizedVsStandard(b *testing.B) {
 
 		b.Run(fmt.Sprintf("优化版本_%d次抽奖", count), func(b *testing.B) {
 			b.ResetTimer()
-			for i := 0; b.Loop(); i++ {
+			for i := 0; i < b.N; i++ {
 				lockKey := fmt.Sprintf("optimized_%d_%d", count, i)
 				_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, count, nil)
 				if err != nil {
@@ -258,7 +262,7 @@ func BenchmarkLockPerformance(b *testing.B) {
 
 	b.Run("锁获取和释放", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; b.Loop(); i++ {
+		for i := 0; i < b.N; i++ {
 			lockKey := fmt.Sprintf("lock_perf_%d", i)
 			lockValue := generateLockValue()
 
@@ -287,10 +291,10 @@ func BenchmarkLockPerformance(b *testing.B) {
 		lockKey := "concurrent_lock_test"
 
 		b.ResetTimer()
-		for b.Loop() {
+		for i := 0; i < b.N; i++ {
 			var wg sync.WaitGroup
 
-			for j := range goroutines {
+			for j := 0; j < goroutines; j++ {
 				wg.Add(1)
 				go func(id int) {
 					defer wg.Done()
@@ -333,7 +337,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 		runtime.ReadMemStats(&m1)
 
 		b.ResetTimer()
-		for i := 0; b.Loop(); i++ {
+		for i := 0; i < b.N; i++ {
 			lockKey := fmt.Sprintf("memory_test_%d", i)
 			_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 10000, 1000, nil)
 			if err != nil {
@@ -363,7 +367,11 @@ func TestConcurrentPerformance(t *testing.T) {
 		t.Skip("Redis不可用，跳过并发测试")
 	}
 
-	engine := NewLotteryEngineWithLogger(rdb, NewSilentLogger())
+	// 创建一个自定义配置，禁用熔断器
+	config := NewDefaultConfigManager()
+	config.config.CircuitBreaker.Enabled = false // 禁用熔断器，避免高并发测试触发熔断
+
+	engine := NewLotteryEngineWithConfigAndLogger(rdb, config, NewSilentLogger())
 
 	t.Run("高并发范围抽奖正确性", func(t *testing.T) {
 		const (
@@ -377,13 +385,13 @@ func TestConcurrentPerformance(t *testing.T) {
 
 		startTime := time.Now()
 
-		for i := range goroutines {
+		for i := 0; i < goroutines; i++ {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
 				ctx := context.Background()
 
-				for j := range drawsPerGoroutine {
+				for j := 0; j < drawsPerGoroutine; j++ {
 					lockKey := fmt.Sprintf("concurrent_test_%d_%d", id, j)
 					result, err := engine.DrawInRange(ctx, lockKey, 1, 1000)
 					if err != nil {
@@ -449,13 +457,13 @@ func TestConcurrentPerformance(t *testing.T) {
 
 		startTime := time.Now()
 
-		for i := range goroutines {
+		for i := 0; i < goroutines; i++ {
 			wg.Add(1)
 			go func(id int) {
 				defer wg.Done()
 				ctx := context.Background()
 
-				for j := range drawsPerGoroutine {
+				for j := 0; j < drawsPerGoroutine; j++ {
 					lockKey := fmt.Sprintf("concurrent_prize_test_%d_%d", id, j)
 					result, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
 					if err != nil {
@@ -891,7 +899,7 @@ func BenchmarkOptimizedVsStandardPerformance(b *testing.B) {
 	b.Run("标准引擎_范围抽奖", func(b *testing.B) {
 		ctx := context.Background()
 		b.ResetTimer()
-		for b.Loop() {
+		for i := 0; i < b.N; i++ {
 			lockKey := "standard_range_" + generateLockValue()
 			_, err := standardEngine.DrawInRange(ctx, lockKey, 1, 1000)
 			if err != nil && err != ErrLockAcquisitionFailed {
@@ -903,7 +911,7 @@ func BenchmarkOptimizedVsStandardPerformance(b *testing.B) {
 	b.Run("增强引擎_范围抽奖", func(b *testing.B) {
 		ctx := context.Background()
 		b.ResetTimer()
-		for b.Loop() {
+		for i := 0; i < b.N; i++ {
 			lockKey := "enhanced_range_" + generateLockValue()
 			_, err := optimizedEngine.DrawInRange(ctx, lockKey, 1, 1000)
 			if err != nil && err != ErrLockAcquisitionFailed {
@@ -922,7 +930,7 @@ func BenchmarkOptimizedVsStandardPerformance(b *testing.B) {
 
 		ctx := context.Background()
 		b.ResetTimer()
-		for b.Loop() {
+		for i := 0; i < b.N; i++ {
 			lockKey := "standard_prize_" + generateLockValue()
 			_, err := standardEngine.DrawFromPrizes(ctx, lockKey, prizes)
 			if err != nil && err != ErrLockAcquisitionFailed {
@@ -941,12 +949,200 @@ func BenchmarkOptimizedVsStandardPerformance(b *testing.B) {
 
 		ctx := context.Background()
 		b.ResetTimer()
-		for b.Loop() {
+		for i := 0; i < b.N; i++ {
 			lockKey := "enhanced_prize_" + generateLockValue()
 			_, err := optimizedEngine.DrawFromPrizes(ctx, lockKey, prizes)
 			if err != nil && err != ErrLockAcquisitionFailed {
 				b.Fatal(err)
 			}
 		}
+	})
+}
+
+// ================================================================================
+// Additional Monitor Tests
+// ================================================================================
+
+func TestPerformanceMetrics_Comprehensive(t *testing.T) {
+	t.Run("吞吐量计算边界测试", func(t *testing.T) {
+		now := time.Now().UnixNano()
+		metrics := &PerformanceMetrics{
+			TotalDraws:      1000,
+			SuccessfulDraws: 950,
+			FailedDraws:     50,
+			StartTime:       now - int64(10*time.Second),
+			LastUpdateTime:  now,
+		}
+
+		throughput := metrics.GetThroughput()
+		expectedThroughput := 100.0 // 1000 draws / 10 seconds
+		assert.InDelta(t, expectedThroughput, throughput, 1.0)
+	})
+
+	t.Run("零操作时间的吞吐量", func(t *testing.T) {
+		metrics := &PerformanceMetrics{
+			TotalDraws: 100,
+			StartTime:  0,
+		}
+
+		throughput := metrics.GetThroughput()
+		assert.Equal(t, 0.0, throughput)
+	})
+
+	t.Run("重置功能", func(t *testing.T) {
+		metrics := &PerformanceMetrics{
+			TotalDraws:      100,
+			SuccessfulDraws: 90,
+			FailedDraws:     10,
+			TotalDrawTime:   int64(time.Second),
+		}
+
+		metrics.Reset()
+
+		assert.Equal(t, int64(0), metrics.TotalDraws)
+		assert.Equal(t, int64(0), metrics.SuccessfulDraws)
+		assert.Equal(t, int64(0), metrics.FailedDraws)
+		assert.Equal(t, int64(0), metrics.TotalDrawTime)
+	})
+}
+
+func TestPerformanceMonitor_Comprehensive(t *testing.T) {
+	t.Run("Redis错误记录", func(t *testing.T) {
+		monitor := NewPerformanceMonitor()
+		monitor.ResetMetrics()
+
+		// 记录Redis错误
+		monitor.RecordRedisError()
+		monitor.RecordRedisError()
+		monitor.RecordRedisError()
+
+		// 验证监控器仍然正常工作
+		metrics := monitor.GetMetrics()
+		assert.Equal(t, int64(3), metrics.RedisErrors)
+	})
+
+	t.Run("大量操作记录", func(t *testing.T) {
+		monitor := NewPerformanceMonitor()
+		monitor.ResetMetrics()
+
+		// 记录大量操作
+		for i := 0; i < 10000; i++ {
+			monitor.RecordDraw(i%10 != 0, time.Microsecond*time.Duration(i%100+1))
+			if i%5 == 0 {
+				monitor.RecordLockAcquisition(true, time.Microsecond*time.Duration(i%50+1))
+			}
+			if i%7 == 0 {
+				monitor.RecordLockRelease()
+			}
+		}
+
+		metrics := monitor.GetMetrics()
+		assert.Equal(t, int64(10000), metrics.TotalDraws)
+		assert.Equal(t, int64(9000), metrics.SuccessfulDraws) // 90% success rate
+		assert.Equal(t, int64(1000), metrics.FailedDraws)     // 10% failure rate
+		assert.Greater(t, metrics.LockAcquisitions, int64(0))
+		assert.Greater(t, metrics.LockReleases, int64(0))
+	})
+
+	t.Run("并发安全性", func(t *testing.T) {
+		monitor := NewPerformanceMonitor()
+		monitor.ResetMetrics()
+
+		const goroutines = 100
+		const operationsPerGoroutine = 100
+
+		var wg sync.WaitGroup
+		for i := 0; i < goroutines; i++ {
+			wg.Add(1)
+			go func(id int) {
+				defer wg.Done()
+				for j := 0; j < operationsPerGoroutine; j++ {
+					monitor.RecordDraw(true, time.Microsecond*10)
+					monitor.RecordLockAcquisition(true, time.Microsecond*5)
+					monitor.RecordLockRelease()
+				}
+			}(i)
+		}
+
+		wg.Wait()
+
+		metrics := monitor.GetMetrics()
+		expectedDraws := int64(goroutines * operationsPerGoroutine)
+		assert.Equal(t, expectedDraws, metrics.TotalDraws)
+		assert.Equal(t, expectedDraws, metrics.SuccessfulDraws)
+		assert.Equal(t, expectedDraws, metrics.LockAcquisitions)
+		assert.Equal(t, expectedDraws, metrics.LockReleases)
+	})
+}
+
+// 性能基准测试
+func BenchmarkPerformanceMonitor_Operations(b *testing.B) {
+	monitor := NewPerformanceMonitor()
+
+	b.Run("RecordDraw", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			monitor.RecordDraw(true, time.Microsecond*10)
+		}
+	})
+
+	b.Run("RecordLockAcquisition", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			monitor.RecordLockAcquisition(true, time.Microsecond*5)
+		}
+	})
+
+	b.Run("RecordLockRelease", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			monitor.RecordLockRelease()
+		}
+	})
+
+	b.Run("GetMetrics", func(b *testing.B) {
+		// 预先记录一些数据
+		for i := 0; i < 1000; i++ {
+			monitor.RecordDraw(true, time.Microsecond*10)
+		}
+
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			_ = monitor.GetMetrics()
+		}
+	})
+
+	b.Run("ResetMetrics", func(b *testing.B) {
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			monitor.ResetMetrics()
+		}
+	})
+}
+
+func BenchmarkPerformanceMonitor_Concurrent(b *testing.B) {
+	monitor := NewPerformanceMonitor()
+
+	b.Run("并发记录操作", func(b *testing.B) {
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				monitor.RecordDraw(true, time.Microsecond*10)
+				monitor.RecordLockAcquisition(true, time.Microsecond*5)
+				monitor.RecordLockRelease()
+			}
+		})
+	})
+
+	b.Run("并发获取指标", func(b *testing.B) {
+		// 预先记录一些数据
+		for i := 0; i < 1000; i++ {
+			monitor.RecordDraw(true, time.Microsecond*10)
+		}
+
+		b.RunParallel(func(pb *testing.PB) {
+			for pb.Next() {
+				_ = monitor.GetMetrics()
+			}
+		})
 	})
 }

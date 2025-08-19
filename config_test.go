@@ -1,6 +1,7 @@
 package lottery
 
 import (
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -229,7 +230,7 @@ func BenchmarkConfigManager_LoadConfig(b *testing.B) {
 
 	b.ReportAllocs()
 
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		_, err := cm.LoadConfig()
 		if err != nil {
 			b.Fatalf("Failed to load config: %v", err)
@@ -256,10 +257,162 @@ func BenchmarkConfig_Validation(b *testing.B) {
 
 	b.ReportAllocs()
 
-	for b.Loop() {
+	for i := 0; i < b.N; i++ {
 		err := cm.validateConfig(config)
 		if err != nil {
 			b.Fatalf("Config validation failed: %v", err)
 		}
+	}
+}
+
+// ================================================================================
+// Logger Tests
+// ================================================================================
+
+func TestDefaultLogger_Info(t *testing.T) {
+	logger := &DefaultLogger{}
+
+	// 测试基本信息日志
+	logger.Info("Test info message")
+	logger.Info("Test info with args: %s %d", "test", 123)
+
+	// 测试空消息
+	logger.Info("")
+
+	// 测试特殊字符
+	logger.Info("Test with special chars: %v", map[string]int{"key": 1})
+}
+
+func TestDefaultLogger_Error(t *testing.T) {
+	logger := &DefaultLogger{}
+
+	// 测试基本错误日志
+	logger.Error("Test error message")
+	logger.Error("Test error with args: %s %d", "error", 500)
+
+	// 测试空消息
+	logger.Error("")
+
+	// 测试错误对象
+	logger.Error("Error occurred: %v", errors.New("test error"))
+}
+
+func TestDefaultLogger_Debug(t *testing.T) {
+	logger := &DefaultLogger{}
+
+	// 测试基本调试日志
+	logger.Debug("Test debug message")
+	logger.Debug("Test debug with args: %s %d", "debug", 42)
+
+	// 测试空消息
+	logger.Debug("")
+
+	// 测试复杂数据结构
+	logger.Debug("Debug data: %+v", struct {
+		Name  string
+		Value int
+	}{"test", 100})
+}
+
+func TestSilentLogger_NewSilentLogger(t *testing.T) {
+	logger := NewSilentLogger()
+	if logger == nil {
+		t.Error("NewSilentLogger should return non-nil logger")
+	}
+}
+
+func TestSilentLogger_Info(t *testing.T) {
+	logger := NewSilentLogger()
+
+	// 测试静默日志 - 不应该有任何输出
+	logger.Info("This should not appear")
+	logger.Info("Test with args: %s %d", "silent", 123)
+	logger.Info("")
+
+	// 测试不会panic
+	logger.Info("Test with nil args: %v", nil)
+}
+
+func TestSilentLogger_Error(t *testing.T) {
+	logger := NewSilentLogger()
+
+	// 测试静默错误日志 - 不应该有任何输出
+	logger.Error("This error should not appear")
+	logger.Error("Test error with args: %s %d", "silent", 500)
+	logger.Error("")
+
+	// 测试不会panic
+	logger.Error("Test with error: %v", errors.New("silent error"))
+}
+
+func TestSilentLogger_Debug(t *testing.T) {
+	logger := NewSilentLogger()
+
+	// 测试静默调试日志 - 不应该有任何输出
+	logger.Debug("This debug should not appear")
+	logger.Debug("Test debug with args: %s %d", "silent", 42)
+	logger.Debug("")
+
+	// 测试不会panic
+	logger.Debug("Test with complex data: %+v", map[string]any{"key": "value"})
+}
+
+func TestLogger_Interface_Compliance(t *testing.T) {
+	// 测试DefaultLogger实现了Logger接口
+	var logger Logger = &DefaultLogger{}
+	logger.Info("Interface test")
+	logger.Error("Interface test")
+	logger.Debug("Interface test")
+
+	// 测试SilentLogger实现了Logger接口
+	var silentLogger Logger = NewSilentLogger()
+	silentLogger.Info("Silent interface test")
+	silentLogger.Error("Silent interface test")
+	silentLogger.Debug("Silent interface test")
+}
+
+func TestLogger_EdgeCases(t *testing.T) {
+	t.Run("default_logger_with_many_args", func(t *testing.T) {
+		logger := &DefaultLogger{}
+		logger.Info("Many args: %s %d %f %t %v", "str", 123, 3.14, true, []int{1, 2, 3})
+	})
+
+	t.Run("silent_logger_with_many_args", func(t *testing.T) {
+		logger := NewSilentLogger()
+		logger.Error("Many args: %s %d %f %t %v", "str", 123, 3.14, true, []int{1, 2, 3})
+	})
+
+	t.Run("format_string_mismatch", func(t *testing.T) {
+		logger := &DefaultLogger{}
+		// 测试格式字符串与参数不匹配的情况
+		logger.Info("Format mismatch: %s %d", "only_one_arg")
+		logger.Debug("Too many args: %s", "arg1", "arg2", "arg3")
+	})
+
+	t.Run("nil_args", func(t *testing.T) {
+		logger := &DefaultLogger{}
+		logger.Info("Nil test: %v %s", nil, "after nil")
+
+		silentLogger := NewSilentLogger()
+		silentLogger.Error("Silent nil test: %v %s", nil, "after nil")
+	})
+}
+
+// 性能测试
+func BenchmarkDefaultLogger_Info(b *testing.B) {
+	logger := &DefaultLogger{}
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("Benchmark test message %d", i)
+	}
+}
+
+func BenchmarkSilentLogger_Info(b *testing.B) {
+	logger := NewSilentLogger()
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		logger.Info("Benchmark silent message %d", i)
 	}
 }

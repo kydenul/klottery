@@ -888,7 +888,7 @@ func BenchmarkRetryLogic(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 
-		for i := 0; b.Loop(); i++ {
+		for i := 0; i < b.N; i++ {
 			key := fmt.Sprintf("lottery:state:benchmark_success_%d", i)
 			err := spm.saveState(ctx, key, state, DefaultStateTTL)
 			if err != nil {
@@ -907,7 +907,7 @@ func BenchmarkRetryLogic(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 
-		for i := 0; b.Loop(); i++ {
+		for i := 0; i < b.N; i++ {
 			key := fmt.Sprintf("lottery:state:benchmark_retry_%d", i)
 			err := spm.saveState(ctx, key, state, DefaultStateTTL)
 			if err != nil {
@@ -922,7 +922,7 @@ func BenchmarkConcurrentOperations(b *testing.B) {
 	db, mock := redismock.NewClientMock()
 	defer db.Close()
 
-	logger := &DefaultLogger{}
+	logger := &SilentLogger{}
 	spm := NewStatePersistenceManager(db, logger)
 	ctx := context.Background()
 
@@ -976,14 +976,14 @@ func BenchmarkErrorHandlingOverhead(b *testing.B) {
 			state := createBenchmarkDrawState(tc.totalCount, tc.completedCount, tc.prizeCount)
 
 			// Setup mock expectations for successful operations
-			for b.Loop() {
+			for i := 0; i < b.N; i++ {
 				mock.Regexp().ExpectSet(`lottery:state:.*`, `.*`, DefaultStateTTL).SetVal("OK")
 			}
 
 			b.ResetTimer()
 			b.ReportAllocs()
 
-			for i := 0; b.Loop(); i++ {
+			for i := 0; i < b.N; i++ {
 				key := fmt.Sprintf("lottery:state:enhanced_%s_%d", tc.name, i)
 				err := spm.saveState(ctx, key, state, DefaultStateTTL)
 				if err != nil {
@@ -1014,7 +1014,7 @@ func BenchmarkRetryMechanismPerformance(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 
-		for i := 0; b.Loop(); i++ {
+		for i := 0; i < b.N; i++ {
 			key := fmt.Sprintf("lottery:state:no_retry_%d", i)
 			err := spm.saveState(ctx, key, state, DefaultStateTTL)
 			if err != nil {
@@ -1033,7 +1033,7 @@ func BenchmarkRetryMechanismPerformance(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 
-		for i := 0; b.Loop(); i++ {
+		for i := 0; i < b.N; i++ {
 			key := fmt.Sprintf("lottery:state:one_retry_%d", i)
 			err := spm.saveState(ctx, key, state, DefaultStateTTL)
 			if err != nil {
@@ -1053,7 +1053,7 @@ func BenchmarkRetryMechanismPerformance(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 
-		for i := 0; b.Loop(); i++ {
+		for i := 0; i < b.N; i++ {
 			key := fmt.Sprintf("lottery:state:two_retries_%d", i)
 			err := spm.saveState(ctx, key, state, DefaultStateTTL)
 			if err != nil {
@@ -1140,15 +1140,15 @@ func BenchmarkContextTimeoutHandling(b *testing.B) {
 	state := createBenchmarkDrawState(100, 50, 10)
 
 	b.Run("ShortTimeout_Success", func(b *testing.B) {
-		// Operations complete within timeout
-		for b.Loop() {
+		// Setup mock expectations
+		for i := 0; i < b.N; i++ {
 			mock.Regexp().ExpectSet(`lottery:state:.*`, `.*`, DefaultStateTTL).SetVal("OK")
 		}
 
 		b.ResetTimer()
 		b.ReportAllocs()
 
-		for i := 0; b.Loop(); i++ {
+		for i := 0; i < b.N; i++ {
 			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Millisecond)
 			key := fmt.Sprintf("lottery:state:short_timeout_%d", i)
 			err := spm.saveState(ctx, key, state, DefaultStateTTL)
@@ -1160,8 +1160,8 @@ func BenchmarkContextTimeoutHandling(b *testing.B) {
 	})
 
 	b.Run("LongTimeout_WithRetry", func(b *testing.B) {
-		// First attempt fails, second succeeds within timeout
-		for b.Loop() {
+		// Setup mock expectations - first attempt fails, second succeeds
+		for i := 0; i < b.N; i++ {
 			mock.Regexp().ExpectSet(`lottery:state:.*`, `.*`, DefaultStateTTL).SetErr(fmt.Errorf("connection timeout"))
 			mock.Regexp().ExpectSet(`lottery:state:.*`, `.*`, DefaultStateTTL).SetVal("OK")
 		}
@@ -1169,7 +1169,7 @@ func BenchmarkContextTimeoutHandling(b *testing.B) {
 		b.ResetTimer()
 		b.ReportAllocs()
 
-		for i := 0; b.Loop(); i++ {
+		for i := 0; i < b.N; i++ {
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			key := fmt.Sprintf("lottery:state:long_timeout_%d", i)
 			err := spm.saveState(ctx, key, state, DefaultStateTTL)
@@ -1224,14 +1224,6 @@ func createBenchmarkDrawState(totalCount, completedCount, prizeCount int) *DrawS
 		StartTime:      time.Now().Unix(),
 		LastUpdateTime: time.Now().Unix(),
 	}
-}
-
-// min returns the minimum of two integers
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 // ----------------

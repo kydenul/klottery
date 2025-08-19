@@ -249,20 +249,16 @@ func productionBestPracticesExample(ctx context.Context) {
 
 	// 2. 使用生产级配置
 	fmt.Println("2. 生产级抽奖引擎配置:")
-	config, err := lottery.NewLotteryConfig(
-		30*time.Second,       // 锁超时
-		5,                    // 重试次数
-		100*time.Millisecond, // 重试间隔
-		1*time.Second,
-	)
-	if err != nil {
-		fmt.Printf("❌ 配置创建失败: %v\n", err)
-		return
-	}
+	configManager := lottery.NewDefaultConfigManager()
+	config := configManager.GetConfig()
+	config.Engine.LockTimeout = 30 * time.Second
+	config.Engine.RetryAttempts = 5
+	config.Engine.RetryInterval = 100 * time.Millisecond
+	config.Engine.LockCacheTTL = 1 * time.Second
 
 	// 3. 使用静默日志记录器 (生产环境)
 	silentLogger := lottery.NewSilentLogger()
-	engine := lottery.NewLotteryEngineWithConfigAndLogger(productionRdb, config, silentLogger)
+	engine := lottery.NewLotteryEngineWithConfigAndLogger(productionRdb, configManager, silentLogger)
 
 	// 4. 健康检查
 	fmt.Println("3. 健康检查:")

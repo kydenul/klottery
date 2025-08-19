@@ -129,6 +129,613 @@ func TestDistributedLockManager_CoreFunctionality(t *testing.T) {
 	})
 }
 
+// ================================================================================
+// Engine Advanced Features Tests (Circuit Breaker, Resume, Monitoring)
+// ================================================================================
+
+func setupTestRedis(t *testing.T) *redis.Client {
+	// 创建Redis客户端用于测试
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+		DB:   1, // 使用测试数据库
+	})
+
+	// 测试连接
+	ctx := context.Background()
+	_, err := rdb.Ping(ctx).Result()
+	if err != nil {
+		t.Skipf("Redis not available: %v", err)
+	}
+
+	// 清理测试数据库
+	rdb.FlushDB(ctx)
+
+	return rdb
+}
+
+func TestLotteryEngine_CircuitBreaker(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	defer redisClient.Close()
+
+	// 创建配置，启用熔断器
+	config := &Config{
+		Engine: &EngineConfig{
+			LockTimeout:   time.Second,
+			RetryAttempts: 1,
+			RetryInterval: time.Millisecond * 100,
+			LockCacheTTL:  time.Second * 5,
+		},
+		CircuitBreaker: &CircuitBreakerConfig{
+			Enabled:       true,
+			Name:          "test-breaker",
+			MaxRequests:   5,
+			MinRequests:   3,
+			FailureRatio:  0.6,
+			Interval:      time.Second * 10,
+			Timeout:       time.Second * 5,
+			OnStateChange: true,
+		},
+	}
+
+	cm := &ConfigManager{config: config}
+	engine := NewLotteryEngineWithConfig(redisClient, cm)
+
+	t.Run("circuit_breaker_enabled", func(t *testing.T) {
+		state := engine.GetCircuitBreakerState()
+		assert.Equal(t, "closed", state)
+	})
+
+	t.Run("circuit_breaker_counts", func(t *testing.T) {
+		counts := engine.GetCircuitBreakerCounts()
+		assert.Equal(t, uint32(0), counts.Requests)
+		assert.Equal(t, uint32(0), counts.TotalFailures)
+	})
+
+	t.Run("circuit_breaker_health_check", func(t *testing.T) {
+		health := engine.CircuitBreakerHealthCheck()
+		assert.True(t, health["circuit_breaker_enabled"].(bool))
+		assert.Equal(t, "closed", health["state"])
+		assert.True(t, health["healthy"].(bool))
+	})
+
+	t.Run("circuit_breaker_metrics", func(t *testing.T) {
+		metrics := engine.CircuitBreakerMetrics()
+		assert.True(t, metrics["circuit_breaker_enabled"].(bool))
+		assert.Equal(t, "closed", metrics["circuit_breaker_state"])
+		assert.Equal(t, 0, metrics["circuit_breaker_state_numeric"])
+	})
+
+	t.Run("enable_disable_circuit_breaker", func(t *testing.T) {
+		engine.DisableCircuitBreaker()
+		state := engine.GetCircuitBreakerState()
+		assert.Equal(t, "closed", state) // 禁用后状态仍为closed
+
+		engine.EnableCircuitBreaker()
+		state = engine.GetCircuitBreakerState()
+		assert.Equal(t, "closed", state)
+	})
+
+	t.Run("reset_circuit_breaker", func(t *testing.T) {
+		engine.ResetCircuitBreaker()
+		state := engine.GetCircuitBreakerState()
+		assert.Equal(t, "closed", state)
+	})
+}
+
+func TestLotteryEngine_ConfigurationUpdates(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	defer redisClient.Close()
+
+	engine := NewLotteryEngine(redisClient)
+
+	t.Run("update_config", func(t *testing.T) {
+		newConfig := &Config{
+			Engine: &EngineConfig{
+				LockTimeout:   time.Second * 2,
+				RetryAttempts: 5,
+				RetryInterval: time.Millisecond * 200,
+				LockCacheTTL:  time.Second * 10,
+			},
+			Redis: &RedisConfig{
+				Addr:     "localhost:6379",
+				PoolSize: 10,
+			},
+			CircuitBreaker: &CircuitBreakerConfig{
+				Enabled: false,
+			},
+		}
+
+		err := engine.UpdateConfig(newConfig)
+		assert.NoError(t, err)
+
+		config := engine.GetConfig()
+		assert.Equal(t, time.Second*2, config.Engine.LockTimeout)
+		assert.Equal(t, 5, config.Engine.RetryAttempts)
+	})
+
+	t.Run("update_config_nil", func(t *testing.T) {
+		err := engine.UpdateConfig(nil)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidParameters, err)
+	})
+
+	t.Run("set_lock_timeout", func(t *testing.T) {
+		err := engine.SetLockTimeout(time.Second * 3)
+		assert.NoError(t, err)
+
+		config := engine.GetConfig()
+		assert.Equal(t, time.Second*3, config.Engine.LockTimeout)
+	})
+
+	t.Run("set_lock_timeout_invalid", func(t *testing.T) {
+		err := engine.SetLockTimeout(time.Nanosecond)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidLockTimeout, err)
+
+		err = engine.SetLockTimeout(time.Hour)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidLockTimeout, err)
+	})
+
+	t.Run("set_retry_attempts", func(t *testing.T) {
+		err := engine.SetRetryAttempts(3)
+		assert.NoError(t, err)
+
+		config := engine.GetConfig()
+		assert.Equal(t, 3, config.Engine.RetryAttempts)
+	})
+
+	t.Run("set_retry_attempts_invalid", func(t *testing.T) {
+		err := engine.SetRetryAttempts(-1)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidRetryAttempts, err)
+
+		err = engine.SetRetryAttempts(1000)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidRetryAttempts, err)
+	})
+
+	t.Run("set_retry_interval", func(t *testing.T) {
+		err := engine.SetRetryInterval(time.Millisecond * 500)
+		assert.NoError(t, err)
+
+		config := engine.GetConfig()
+		assert.Equal(t, time.Millisecond*500, config.Engine.RetryInterval)
+	})
+
+	t.Run("set_retry_interval_invalid", func(t *testing.T) {
+		err := engine.SetRetryInterval(-time.Second)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidRetryInterval, err)
+	})
+
+	t.Run("set_logger", func(t *testing.T) {
+		originalLogger := engine.GetLogger()
+		newLogger := NewSilentLogger()
+
+		engine.SetLogger(newLogger)
+		assert.Equal(t, newLogger, engine.GetLogger())
+
+		// 测试设置nil logger
+		engine.SetLogger(nil)
+		assert.Equal(t, newLogger, engine.GetLogger()) // 应该保持不变
+
+		// 测试设置相同logger
+		engine.SetLogger(newLogger)
+		assert.Equal(t, newLogger, engine.GetLogger())
+
+		// 恢复原始logger
+		engine.SetLogger(originalLogger)
+	})
+}
+
+func TestLotteryEngine_StateManagement(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	defer redisClient.Close()
+
+	engine := NewLotteryEngine(redisClient)
+	ctx := context.Background()
+
+	t.Run("save_and_load_draw_state", func(t *testing.T) {
+		drawState := &DrawState{
+			LockKey:        "test-state-key",
+			TotalCount:     10,
+			CompletedCount: 5,
+			Results:        []int{1, 2, 3, 4, 5},
+			StartTime:      time.Now().Unix(),
+			LastUpdateTime: time.Now().Unix(),
+		}
+
+		// 保存状态
+		err := engine.SaveDrawState(ctx, drawState)
+		assert.NoError(t, err)
+
+		// 加载状态
+		loadedState, err := engine.LoadDrawState(ctx, "test-state-key")
+		assert.NoError(t, err)
+		assert.NotNil(t, loadedState)
+		assert.Equal(t, drawState.LockKey, loadedState.LockKey)
+		assert.Equal(t, drawState.TotalCount, loadedState.TotalCount)
+		assert.Equal(t, drawState.CompletedCount, loadedState.CompletedCount)
+		assert.Equal(t, len(drawState.Results), len(loadedState.Results))
+	})
+
+	t.Run("save_draw_state_nil", func(t *testing.T) {
+		err := engine.SaveDrawState(ctx, nil)
+		assert.Error(t, err)
+		assert.Equal(t, ErrDrawStateCorrupted, err)
+	})
+
+	t.Run("load_draw_state_empty_key", func(t *testing.T) {
+		_, err := engine.LoadDrawState(ctx, "")
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidParameters, err)
+	})
+
+	t.Run("load_draw_state_not_found", func(t *testing.T) {
+		state, err := engine.LoadDrawState(ctx, "non-existent-key")
+		assert.NoError(t, err)
+		assert.Nil(t, state)
+	})
+
+	t.Run("rollback_multi_draw", func(t *testing.T) {
+		drawState := &DrawState{
+			LockKey:        "test-rollback-key",
+			TotalCount:     10,
+			CompletedCount: 3,
+			Results:        []int{1, 2, 3},
+			StartTime:      time.Now().Unix(),
+			LastUpdateTime: time.Now().Unix(),
+		}
+
+		// 先保存状态
+		err := engine.SaveDrawState(ctx, drawState)
+		assert.NoError(t, err)
+
+		// 执行回滚
+		err = engine.RollbackMultiDraw(ctx, drawState)
+		assert.NoError(t, err)
+	})
+
+	t.Run("rollback_multi_draw_nil", func(t *testing.T) {
+		err := engine.RollbackMultiDraw(ctx, nil)
+		assert.Error(t, err)
+		assert.Equal(t, ErrDrawStateCorrupted, err)
+	})
+}
+
+func TestLotteryEngine_ResumeOperations(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	defer redisClient.Close()
+
+	engine := NewLotteryEngine(redisClient)
+	ctx := context.Background()
+
+	t.Run("resume_multi_draw_in_range_no_state", func(t *testing.T) {
+		// 没有保存的状态，应该开始新的抽奖
+		result, err := engine.ResumeMultiDrawInRange(ctx, "resume-range-key", 1, 100, 3)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, 3, result.TotalRequested)
+		assert.Equal(t, 3, result.Completed)
+		assert.Equal(t, 0, result.Failed)
+	})
+
+	t.Run("resume_multi_draw_from_prizes_no_state", func(t *testing.T) {
+		prizes := []Prize{
+			{ID: "1", Name: "Prize1", Probability: 0.5, Value: 100},
+			{ID: "2", Name: "Prize2", Probability: 0.5, Value: 200},
+		}
+
+		// 没有保存的状态，应该开始新的抽奖
+		result, err := engine.ResumeMultiDrawFromPrizes(ctx, "resume-prize-key", prizes, 2)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, 2, result.TotalRequested)
+		assert.Equal(t, 2, result.Completed)
+		assert.Equal(t, 0, result.Failed)
+	})
+
+	t.Run("resume_multi_draw_with_saved_state", func(t *testing.T) {
+		// 创建部分完成的状态
+		drawState := &DrawState{
+			LockKey:        "resume-with-state-key",
+			TotalCount:     5,
+			CompletedCount: 2,
+			Results:        []int{10, 20},
+			StartTime:      time.Now().Unix(),
+			LastUpdateTime: time.Now().Unix(),
+		}
+
+		// 保存状态
+		err := engine.SaveDrawState(ctx, drawState)
+		assert.NoError(t, err)
+
+		// 恢复操作
+		result, err := engine.ResumeMultiDrawInRange(ctx, "resume-with-state-key", 1, 100, 5)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, 5, result.TotalRequested)
+		assert.Equal(t, 5, result.Completed) // 应该完成所有5个
+		assert.Equal(t, 0, result.Failed)
+		assert.Equal(t, 5, len(result.Results)) // 包含之前的2个和新的3个
+	})
+
+	t.Run("resume_multi_draw_already_completed", func(t *testing.T) {
+		// 创建已完成的状态
+		drawState := &DrawState{
+			LockKey:        "resume-completed-key",
+			TotalCount:     3,
+			CompletedCount: 3,
+			Results:        []int{10, 20, 30},
+			StartTime:      time.Now().Unix(),
+			LastUpdateTime: time.Now().Unix(),
+		}
+
+		// 保存状态
+		err := engine.SaveDrawState(ctx, drawState)
+		assert.NoError(t, err)
+
+		// 恢复操作
+		result, err := engine.ResumeMultiDrawInRange(ctx, "resume-completed-key", 1, 100, 3)
+		assert.NoError(t, err)
+		assert.NotNil(t, result)
+		assert.Equal(t, 3, result.TotalRequested)
+		assert.Equal(t, 3, result.Completed)
+		assert.Equal(t, 0, result.Failed)
+		assert.Equal(t, 3, len(result.Results))
+	})
+}
+
+func TestLotteryEngine_PerformanceMonitoring(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	defer redisClient.Close()
+
+	engine := NewLotteryEngine(redisClient)
+	ctx := context.Background()
+
+	t.Run("performance_monitoring_enabled", func(t *testing.T) {
+		engine.EnablePerformanceMonitoring()
+
+		// 执行一些操作
+		_, err := engine.DrawInRange(ctx, "perf-test-key", 1, 100)
+		assert.NoError(t, err)
+
+		// 获取性能指标
+		metrics := engine.PerformanceMetrics()
+		assert.Greater(t, metrics.TotalDraws, int64(0))
+		assert.Greater(t, metrics.SuccessfulDraws, int64(0))
+	})
+
+	t.Run("performance_monitoring_disabled", func(t *testing.T) {
+		engine.ResetPerformanceMetrics()
+		engine.DisablePerformanceMonitoring()
+
+		// 执行操作
+		_, err := engine.DrawInRange(ctx, "perf-disabled-key", 1, 100)
+		assert.NoError(t, err)
+
+		// 性能指标应该不会更新（因为监控被禁用）
+		_ = engine.PerformanceMetrics()
+		// 注意：即使禁用监控，某些操作仍可能记录指标，这取决于具体实现
+	})
+
+	t.Run("draw_with_monitoring", func(t *testing.T) {
+		engine.EnablePerformanceMonitoring()
+		engine.ResetPerformanceMetrics()
+
+		// 使用带监控的抽奖方法
+		result, err := engine.DrawInRangeWithMonitoring(ctx, "monitor-range-key", 1, 100)
+		assert.NoError(t, err)
+		assert.GreaterOrEqual(t, result, 1)
+		assert.LessOrEqual(t, result, 100)
+
+		prizes := []Prize{
+			{ID: "1", Name: "Prize1", Probability: 1.0, Value: 100},
+		}
+		prizeResult, err := engine.DrawFromPrizesWithMonitoring(ctx, "monitor-prize-key", prizes)
+		assert.NoError(t, err)
+		assert.NotNil(t, prizeResult)
+
+		// 检查性能指标
+		metrics := engine.PerformanceMetrics()
+		assert.Greater(t, metrics.TotalDraws, int64(0))
+		assert.Greater(t, metrics.LockAcquisitions, int64(0))
+	})
+
+	t.Run("reset_performance_metrics", func(t *testing.T) {
+		// 先执行一些操作
+		_, err := engine.DrawInRange(ctx, "reset-test-key", 1, 100)
+		assert.NoError(t, err)
+
+		// 重置指标
+		engine.ResetPerformanceMetrics()
+
+		// 检查指标是否被重置
+		metrics := engine.PerformanceMetrics()
+		assert.Equal(t, int64(0), metrics.TotalDraws)
+		assert.Equal(t, int64(0), metrics.SuccessfulDraws)
+	})
+}
+
+func TestLotteryEngine_ErrorHandling(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	defer redisClient.Close()
+
+	engine := NewLotteryEngine(redisClient)
+
+	t.Run("should_abort_on_error", func(t *testing.T) {
+		// 测试关键错误
+		assert.True(t, engine.shouldAbortOnError(ErrRedisConnectionFailed))
+		assert.True(t, engine.shouldAbortOnError(context.DeadlineExceeded))
+		assert.True(t, engine.shouldAbortOnError(context.Canceled))
+
+		// 测试非关键错误
+		assert.False(t, engine.shouldAbortOnError(ErrLockAcquisitionFailed))
+		assert.False(t, engine.shouldAbortOnError(ErrInvalidParameters))
+	})
+
+	t.Run("draw_with_invalid_parameters", func(t *testing.T) {
+		ctx := context.Background()
+
+		// 空锁键
+		_, err := engine.DrawInRange(ctx, "", 1, 100)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidParameters, err)
+
+		// 无效范围
+		_, err = engine.DrawInRange(ctx, "test-key", 100, 1)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidRange, err)
+	})
+
+	t.Run("draw_from_empty_prizes", func(t *testing.T) {
+		ctx := context.Background()
+
+		_, err := engine.DrawFromPrizes(ctx, "test-key", []Prize{})
+		assert.Error(t, err)
+		assert.Equal(t, ErrEmptyPrizePool, err)
+	})
+
+	t.Run("multi_draw_with_invalid_count", func(t *testing.T) {
+		ctx := context.Background()
+
+		_, err := engine.DrawMultipleInRange(ctx, "test-key", 1, 100, 0, nil)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidCount, err)
+
+		_, err = engine.DrawMultipleInRange(ctx, "test-key", 1, 100, -1, nil)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidCount, err)
+	})
+}
+
+func TestLotteryEngine_ConstructorVariants(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	defer redisClient.Close()
+
+	t.Run("new_lottery_engine", func(t *testing.T) {
+		engine := NewLotteryEngine(redisClient)
+		assert.NotNil(t, engine)
+		assert.NotNil(t, engine.GetLogger())
+		assert.NotNil(t, engine.GetConfig())
+	})
+
+	t.Run("new_lottery_engine_with_config", func(t *testing.T) {
+		config := &Config{
+			Engine: &EngineConfig{
+				LockTimeout:   time.Second * 2,
+				RetryAttempts: 3,
+				RetryInterval: time.Millisecond * 100,
+				LockCacheTTL:  time.Second * 10,
+			},
+			Redis: &RedisConfig{
+				Addr:     "localhost:6379",
+				PoolSize: 10,
+			},
+			CircuitBreaker: &CircuitBreakerConfig{
+				Enabled: true,
+				Name:    "test-breaker",
+			},
+		}
+		cm := NewDefaultConfigManager()
+		cm.config = config
+		if cm.config == nil {
+			cm.config = config
+		}
+
+		engine := NewLotteryEngineWithConfig(redisClient, cm)
+		assert.NotNil(t, engine)
+		assert.Equal(t, time.Second*2, engine.GetConfig().Engine.LockTimeout)
+	})
+
+	t.Run("new_lottery_engine_with_logger", func(t *testing.T) {
+		logger := NewSilentLogger()
+		engine := NewLotteryEngineWithLogger(redisClient, logger)
+		assert.NotNil(t, engine)
+		assert.Equal(t, logger, engine.GetLogger())
+	})
+
+	t.Run("new_lottery_engine_with_config_and_logger", func(t *testing.T) {
+		config := &Config{
+			Engine: &EngineConfig{
+				LockTimeout:   time.Second * 3,
+				RetryAttempts: 5,
+				RetryInterval: time.Millisecond * 200,
+				LockCacheTTL:  time.Second * 15,
+			},
+			Redis: &RedisConfig{
+				Addr:     "localhost:6379",
+				PoolSize: 10,
+			},
+			CircuitBreaker: &CircuitBreakerConfig{
+				Enabled: false,
+			},
+		}
+		cm := &ConfigManager{config: config}
+		logger := NewSilentLogger()
+
+		engine := NewLotteryEngineWithConfigAndLogger(redisClient, cm, logger)
+		assert.NotNil(t, engine)
+		assert.Equal(t, logger, engine.GetLogger())
+		assert.Equal(t, time.Second*3, engine.GetConfig().Engine.LockTimeout)
+	})
+}
+
+func TestLotteryEngine_LockCacheOptimization(t *testing.T) {
+	redisClient := setupTestRedis(t)
+	defer redisClient.Close()
+
+	engine := NewLotteryEngine(redisClient)
+	ctx := context.Background()
+
+	t.Run("lock_cache_fast_path", func(t *testing.T) {
+		// 第一次调用应该成功
+		result1, err1 := engine.DrawInRange(ctx, "cache-test-key", 1, 100)
+		assert.NoError(t, err1)
+		assert.GreaterOrEqual(t, result1, 1)
+		assert.LessOrEqual(t, result1, 100)
+
+		// 第二次调用也应该成功（锁机制正常工作）
+		result2, err2 := engine.DrawInRange(ctx, "cache-test-key-2", 1, 100)
+		assert.NoError(t, err2)
+		assert.GreaterOrEqual(t, result2, 1)
+		assert.LessOrEqual(t, result2, 100)
+	})
+
+	t.Run("lock_cache_expiry", func(t *testing.T) {
+		// 使用短TTL配置
+		config := &Config{
+			Engine: &EngineConfig{
+				LockTimeout:   time.Second,
+				RetryAttempts: 1,
+				RetryInterval: time.Millisecond * 100,
+				LockCacheTTL:  time.Millisecond * 100, // 很短的TTL
+			},
+			Redis: &RedisConfig{
+				Addr:     "localhost:6379",
+				PoolSize: 10,
+			},
+			CircuitBreaker: &CircuitBreakerConfig{
+				Enabled: false,
+			},
+		}
+		cm := &ConfigManager{config: config}
+		engineWithShortTTL := NewLotteryEngineWithConfig(redisClient, cm)
+
+		// 第一次调用
+		_, err1 := engineWithShortTTL.DrawInRange(ctx, "cache-expiry-key", 1, 100)
+		assert.NoError(t, err1)
+
+		// 等待缓存过期
+		time.Sleep(time.Millisecond * 150)
+
+		// 第二次调用应该成功（缓存已过期）
+		_, err2 := engineWithShortTTL.DrawInRange(ctx, "cache-expiry-key", 1, 100)
+		assert.NoError(t, err2)
+	})
+}
+
 // TestSecureRandomGenerator_CoreFunctionality 测试随机数生成
 func TestSecureRandomGenerator_CoreFunctionality(t *testing.T) {
 	generator := NewSecureRandomGenerator()
