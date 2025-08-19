@@ -106,7 +106,7 @@ func BenchmarkMultipleDraw(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; b.Loop(); i++ {
 				lockKey := fmt.Sprintf("multi_range_%s_%d", tc.name, i)
-				_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, tc.count)
+				_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, tc.count, nil)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -124,7 +124,7 @@ func BenchmarkMultipleDraw(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; b.Loop(); i++ {
 				lockKey := fmt.Sprintf("multi_prize_%s_%d", tc.name, i)
-				_, err := engine.DrawMultipleFromPrizes(ctx, lockKey, prizes, tc.count)
+				_, err := engine.DrawMultipleFromPrizes(ctx, lockKey, prizes, tc.count, nil)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -219,7 +219,7 @@ func BenchmarkOptimizedVsStandard(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; b.Loop(); i++ {
 				lockKey := fmt.Sprintf("standard_%d_%d", count, i)
-				_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, count)
+				_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, count, nil)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -230,7 +230,7 @@ func BenchmarkOptimizedVsStandard(b *testing.B) {
 			b.ResetTimer()
 			for i := 0; b.Loop(); i++ {
 				lockKey := fmt.Sprintf("optimized_%d_%d", count, i)
-				_, err := engine.DrawMultipleInRangeOptimized(ctx, lockKey, 1, 1000, count, nil)
+				_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, count, nil)
 				if err != nil {
 					b.Fatal(err)
 				}
@@ -335,7 +335,7 @@ func BenchmarkMemoryUsage(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; b.Loop(); i++ {
 			lockKey := fmt.Sprintf("memory_test_%d", i)
-			_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 10000, 1000)
+			_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 10000, 1000, nil)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -654,7 +654,7 @@ func TestEnhancedLotteryEngine(t *testing.T) {
 		assert.LessOrEqual(t, result, 100)
 
 		// 检查性能指标
-		metrics := engine.GetPerformanceMetrics()
+		metrics := engine.PerformanceMetrics()
 		assert.Equal(t, int64(1), metrics.TotalDraws)
 		assert.Equal(t, int64(1), metrics.SuccessfulDraws)
 		assert.Equal(t, int64(0), metrics.FailedDraws)
@@ -664,13 +664,13 @@ func TestEnhancedLotteryEngine(t *testing.T) {
 	t.Run("优化的范围抽奖", func(t *testing.T) {
 		ctx := context.Background()
 
-		result, err := engine.DrawInRangeOptimized(ctx, "optimized_range_test", 1, 100)
+		result, err := engine.DrawInRange(ctx, "optimized_range_test", 1, 100)
 		require.NoError(t, err)
 		assert.GreaterOrEqual(t, result, 1)
 		assert.LessOrEqual(t, result, 100)
 
 		// 检查性能指标
-		metrics := engine.GetPerformanceMetrics()
+		metrics := engine.PerformanceMetrics()
 		assert.Greater(t, metrics.TotalDraws, int64(0))
 		assert.Greater(t, metrics.SuccessfulDraws, int64(0))
 	})
@@ -688,13 +688,13 @@ func TestEnhancedLotteryEngine(t *testing.T) {
 
 		// 现在尝试抽奖应该失败，并且会被缓存
 		start := time.Now()
-		_, err1 := engine.DrawInRangeOptimized(ctx, lockKey, 1, 10)
+		_, err1 := engine.DrawInRange(ctx, lockKey, 1, 10)
 		duration1 := time.Since(start)
 		assert.Equal(t, ErrLockAcquisitionFailed, err1)
 
 		// 立即再次尝试相同的锁键应该快速失败（由于锁缓存）
 		start = time.Now()
-		_, err2 := engine.DrawInRangeOptimized(ctx, lockKey, 1, 10)
+		_, err2 := engine.DrawInRange(ctx, lockKey, 1, 10)
 		duration2 := time.Since(start)
 
 		assert.Equal(t, ErrLockAcquisitionFailed, err2)
@@ -807,28 +807,28 @@ func TestPerformanceMonitoringControl(t *testing.T) {
 	t.Run("性能监控控制", func(t *testing.T) {
 		// 重置指标
 		engine.ResetPerformanceMetrics()
-		metrics := engine.GetPerformanceMetrics()
+		metrics := engine.PerformanceMetrics()
 		assert.Equal(t, int64(0), metrics.TotalDraws)
 
 		// 禁用监控
 		engine.DisablePerformanceMonitoring()
 
 		ctx := context.Background()
-		_, err := engine.DrawInRangeOptimized(ctx, "monitoring_test", 1, 10)
+		_, err := engine.DrawInRange(ctx, "monitoring_test", 1, 10)
 		require.NoError(t, err)
 
 		// 应该没有记录指标
-		metrics = engine.GetPerformanceMetrics()
+		metrics = engine.PerformanceMetrics()
 		assert.Equal(t, int64(0), metrics.TotalDraws)
 
 		// 重新启用监控
 		engine.EnablePerformanceMonitoring()
 
-		_, err = engine.DrawInRangeOptimized(ctx, "monitoring_test_2", 1, 10)
+		_, err = engine.DrawInRange(ctx, "monitoring_test_2", 1, 10)
 		require.NoError(t, err)
 
 		// 现在应该有记录
-		metrics = engine.GetPerformanceMetrics()
+		metrics = engine.PerformanceMetrics()
 		assert.Greater(t, metrics.TotalDraws, int64(0))
 	})
 
@@ -840,13 +840,13 @@ func TestPerformanceMonitoringControl(t *testing.T) {
 			{ID: "prize_3", Name: "三等奖", Probability: 0.7, Value: 100},
 		}
 
-		prize, err := engine.DrawFromPrizesOptimized(ctx, "optimized_prize_test", prizes)
+		prize, err := engine.DrawFromPrizes(ctx, "optimized_prize_test", prizes)
 		require.NoError(t, err)
 		assert.NotNil(t, prize)
 		assert.Contains(t, []string{"prize_1", "prize_2", "prize_3"}, prize.ID)
 
 		// 检查性能指标
-		metrics := engine.GetPerformanceMetrics()
+		metrics := engine.PerformanceMetrics()
 		assert.Greater(t, metrics.TotalDraws, int64(0))
 		assert.Greater(t, metrics.SuccessfulDraws, int64(0))
 	})
@@ -855,15 +855,15 @@ func TestPerformanceMonitoringControl(t *testing.T) {
 		ctx := context.Background()
 
 		// 无效范围
-		_, err := engine.DrawInRangeOptimized(ctx, "invalid_range", 100, 1)
+		_, err := engine.DrawInRange(ctx, "invalid_range", 100, 1)
 		assert.Equal(t, ErrInvalidRange, err)
 
 		// 空锁键
-		_, err = engine.DrawInRangeOptimized(ctx, "", 1, 100)
+		_, err = engine.DrawInRange(ctx, "", 1, 100)
 		assert.Equal(t, ErrInvalidParameters, err)
 
 		// 无效奖品池
-		_, err = engine.DrawFromPrizesOptimized(ctx, "invalid_prizes", []Prize{})
+		_, err = engine.DrawFromPrizes(ctx, "invalid_prizes", []Prize{})
 		assert.Equal(t, ErrEmptyPrizePool, err)
 	})
 }
@@ -905,7 +905,7 @@ func BenchmarkOptimizedVsStandardPerformance(b *testing.B) {
 		b.ResetTimer()
 		for b.Loop() {
 			lockKey := "enhanced_range_" + generateLockValue()
-			_, err := optimizedEngine.DrawInRangeOptimized(ctx, lockKey, 1, 1000)
+			_, err := optimizedEngine.DrawInRange(ctx, lockKey, 1, 1000)
 			if err != nil && err != ErrLockAcquisitionFailed {
 				b.Fatal(err)
 			}
@@ -943,7 +943,7 @@ func BenchmarkOptimizedVsStandardPerformance(b *testing.B) {
 		b.ResetTimer()
 		for b.Loop() {
 			lockKey := "enhanced_prize_" + generateLockValue()
-			_, err := optimizedEngine.DrawFromPrizesOptimized(ctx, lockKey, prizes)
+			_, err := optimizedEngine.DrawFromPrizes(ctx, lockKey, prizes)
 			if err != nil && err != ErrLockAcquisitionFailed {
 				b.Fatal(err)
 			}

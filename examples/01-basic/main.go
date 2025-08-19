@@ -6,6 +6,7 @@ import (
 	"log"
 
 	"github.com/go-redis/redis/v8"
+
 	"github.com/kydenul/lottery"
 )
 
@@ -89,7 +90,7 @@ func basicPrizeExample(ctx context.Context, engine *lottery.LotteryEngine) {
 // 连续抽奖示例
 func multipleDrawExample(ctx context.Context, engine *lottery.LotteryEngine) {
 	// 连续范围抽奖
-	results, err := engine.DrawMultipleInRange(ctx, "user:multi_demo", 1, 20, 5)
+	results, err := engine.DrawMultipleInRange(ctx, "user:multi_demo", 1, 20, 5, nil)
 	if err != nil {
 		fmt.Printf("❌ 连续抽奖失败: %v\n", err)
 		return
@@ -103,14 +104,14 @@ func multipleDrawExample(ctx context.Context, engine *lottery.LotteryEngine) {
 		{ID: "bronze", Name: "铜币", Probability: 0.3, Value: 10},
 	}
 
-	prizeResults, err := engine.DrawMultipleFromPrizes(ctx, "activity:multi_demo", prizes, 3)
+	prizeResults, err := engine.DrawMultipleFromPrizes(ctx, "activity:multi_demo", prizes, 3, nil)
 	if err != nil {
 		fmt.Printf("❌ 连续奖品抽奖失败: %v\n", err)
 		return
 	}
 
 	fmt.Printf("✓ 连续奖品抽奖结果 (3次):\n")
-	for i, prize := range prizeResults {
+	for i, prize := range prizeResults.PrizeResults {
 		fmt.Printf("  第%d次: %s (价值: %d)\n", i+1, prize.Name, prize.Value)
 	}
 }

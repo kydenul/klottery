@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+
 	"github.com/kydenul/lottery"
 )
 
@@ -44,7 +45,7 @@ func main() {
 
 	// 6. 生产环境最佳实践
 	fmt.Println("\n--- 生产环境最佳实践 ---")
-	productionBestPracticesExample(ctx, rdb)
+	productionBestPracticesExample(ctx)
 
 	fmt.Println("\n=== 错误处理最佳实践演示完成 ===")
 }
@@ -68,7 +69,7 @@ func parameterValidationExample(ctx context.Context, rdb *redis.Client) {
 	}
 
 	// 测试无效计数
-	_, err = engine.DrawMultipleInRange(ctx, "param_test", 1, 100, 0)
+	_, err = engine.DrawMultipleInRange(ctx, "param_test", 1, 100, 0, nil)
 	if err != nil {
 		fmt.Printf("✓ 正确捕获无效计数错误: %v\n", err)
 	}
@@ -105,7 +106,7 @@ func timeoutAndCancellationExample(ctx context.Context, rdb *redis.Client) {
 	// 等待确保context超时
 	time.Sleep(5 * time.Millisecond)
 
-	result, err := engine.DrawMultipleInRangeWithRecovery(timeoutCtx, "timeout_test", 1, 100, 10)
+	result, err := engine.DrawMultipleInRange(timeoutCtx, "timeout_test", 1, 100, 10, nil)
 	if err != nil {
 		fmt.Printf("✓ 正确处理超时: %v\n", err)
 		if result != nil && result.PartialSuccess {
@@ -123,7 +124,7 @@ func timeoutAndCancellationExample(ctx context.Context, rdb *redis.Client) {
 		cancelFunc()
 	}()
 
-	result, err = engine.DrawMultipleInRangeWithRecovery(cancelCtx, "cancel_test", 1, 100, 20)
+	result, err = engine.DrawMultipleInRange(cancelCtx, "cancel_test", 1, 100, 20, nil)
 	if err != nil {
 		fmt.Printf("✓ 正确处理取消: %v\n", err)
 		if result != nil && result.PartialSuccess {
@@ -170,7 +171,7 @@ func concurrencySafetyExample(ctx context.Context, rdb *redis.Client) {
 	errors := make(chan error, 10)
 
 	// 启动10个并发抽奖
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		go func(id int) {
 			lockKey := fmt.Sprintf("concurrent_test_%d", id)
 			result, err := engine.DrawInRange(ctx, lockKey, 1, 100)
@@ -186,7 +187,7 @@ func concurrencySafetyExample(ctx context.Context, rdb *redis.Client) {
 	successCount := 0
 	errorCount := 0
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		select {
 		case result := <-results:
 			successCount++
@@ -229,7 +230,7 @@ func errorRecoveryStrategyExample(ctx context.Context, rdb *redis.Client) {
 }
 
 // 生产环境最佳实践
-func productionBestPracticesExample(ctx context.Context, rdb *redis.Client) {
+func productionBestPracticesExample(ctx context.Context) {
 	fmt.Println("生产环境最佳实践:")
 
 	// 1. 使用连接池
@@ -293,7 +294,7 @@ func productionBestPracticesExample(ctx context.Context, rdb *redis.Client) {
 
 // 重试机制实现
 func performWithRetry(ctx context.Context, engine *lottery.LotteryEngine, lockKey string, maxRetries int) bool {
-	for i := 0; i < maxRetries; i++ {
+	for i := range maxRetries {
 		_, err := engine.DrawInRange(ctx, lockKey, 1, 100)
 		if err == nil {
 			return true
@@ -320,7 +321,7 @@ func circuitBreakerDemo(ctx context.Context, engine *lottery.LotteryEngine) {
 	failureCount := 0
 	threshold := 3
 
-	for i := 0; i < 5; i++ {
+	for i := range 5 {
 		if failureCount >= threshold {
 			fmt.Printf("  断路器开启，跳过请求 %d\n", i+1)
 			continue

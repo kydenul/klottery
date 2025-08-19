@@ -86,15 +86,17 @@ func (c *CircuitBreakerEngine) DrawInRange(ctx context.Context, lockKey string, 
 }
 
 // DrawMultipleInRange 在指定范围内进行多次抽奖
-func (c *CircuitBreakerEngine) DrawMultipleInRange(ctx context.Context, lockKey string, min, max, count int) ([]int, error) {
+func (c *CircuitBreakerEngine) DrawMultipleInRange(
+	ctx context.Context, lockKey string, min, max, count int, progressCallback ProgressCallback,
+) (*MultiDrawResult, error) {
 	result, err := c.executeWithBreaker(func() (any, error) {
-		return c.engine.DrawMultipleInRange(ctx, lockKey, min, max, count)
+		return c.engine.DrawMultipleInRange(ctx, lockKey, min, max, count, progressCallback)
 	})
 	if err != nil {
 		return nil, err
 	}
 
-	return result.([]int), nil
+	return result.(*MultiDrawResult), nil
 }
 
 // DrawFromPrizes 从奖品池中抽奖
@@ -110,33 +112,9 @@ func (c *CircuitBreakerEngine) DrawFromPrizes(ctx context.Context, lockKey strin
 }
 
 // DrawMultipleFromPrizes 从奖品池中进行多次抽奖
-func (c *CircuitBreakerEngine) DrawMultipleFromPrizes(ctx context.Context, lockKey string, prizes []Prize, count int) ([]*Prize, error) {
+func (c *CircuitBreakerEngine) DrawMultipleFromPrizes(ctx context.Context, lockKey string, prizes []Prize, count int, progressCallback ProgressCallback) (*MultiDrawResult, error) {
 	result, err := c.executeWithBreaker(func() (any, error) {
-		return c.engine.DrawMultipleFromPrizes(ctx, lockKey, prizes, count)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return result.([]*Prize), nil
-}
-
-// DrawMultipleInRangeWithRecovery 带恢复机制的多次范围抽奖
-func (c *CircuitBreakerEngine) DrawMultipleInRangeWithRecovery(ctx context.Context, lockKey string, min, max, count int) (*MultiDrawResult, error) {
-	result, err := c.executeWithBreaker(func() (any, error) {
-		return c.engine.DrawMultipleInRangeWithRecovery(ctx, lockKey, min, max, count)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return result.(*MultiDrawResult), nil
-}
-
-// DrawMultipleFromPrizesWithRecovery 带恢复机制的多次奖品抽奖
-func (c *CircuitBreakerEngine) DrawMultipleFromPrizesWithRecovery(ctx context.Context, lockKey string, prizes []Prize, count int) (*MultiDrawResult, error) {
-	result, err := c.executeWithBreaker(func() (any, error) {
-		return c.engine.DrawMultipleFromPrizesWithRecovery(ctx, lockKey, prizes, count)
+		return c.engine.DrawMultipleFromPrizes(ctx, lockKey, prizes, count, progressCallback)
 	})
 	if err != nil {
 		return nil, err
@@ -201,30 +179,6 @@ func (c *CircuitBreakerEngine) LoadDrawState(ctx context.Context, lockKey string
 	}
 
 	return result.(*DrawState), nil
-}
-
-// DrawMultipleInRangeOptimized 优化的多次范围抽奖
-func (c *CircuitBreakerEngine) DrawMultipleInRangeOptimized(ctx context.Context, lockKey string, min, max, count int, progressCallback ProgressCallback) (*MultiDrawResult, error) {
-	result, err := c.executeWithBreaker(func() (any, error) {
-		return c.engine.DrawMultipleInRangeOptimized(ctx, lockKey, min, max, count, progressCallback)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return result.(*MultiDrawResult), nil
-}
-
-// DrawMultipleFromPrizesOptimized 优化的多次奖品抽奖
-func (c *CircuitBreakerEngine) DrawMultipleFromPrizesOptimized(ctx context.Context, lockKey string, prizes []Prize, count int, progressCallback ProgressCallback) (*MultiDrawResult, error) {
-	result, err := c.executeWithBreaker(func() (any, error) {
-		return c.engine.DrawMultipleFromPrizesOptimized(ctx, lockKey, prizes, count, progressCallback)
-	})
-	if err != nil {
-		return nil, err
-	}
-
-	return result.(*MultiDrawResult), nil
 }
 
 // GetCircuitBreakerState 获取熔断器状态

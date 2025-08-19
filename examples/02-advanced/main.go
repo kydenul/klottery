@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/go-redis/redis/v8"
+
 	"github.com/kydenul/lottery"
 )
 
@@ -78,7 +79,7 @@ func errorRecoveryExample(ctx context.Context, rdb *redis.Client) {
 	engine := lottery.NewLotteryEngine(rdb)
 
 	// 使用带错误恢复的连抽功能
-	result, err := engine.DrawMultipleInRangeWithRecovery(ctx, "recovery_demo", 1, 50, 10)
+	result, err := engine.DrawMultipleInRange(ctx, "recovery_demo", 1, 50, 10, nil)
 
 	if err != nil {
 		if result != nil && result.PartialSuccess {
@@ -107,7 +108,7 @@ func errorRecoveryExample(ctx context.Context, rdb *redis.Client) {
 		{ID: "nothing", Name: "谢谢参与", Probability: 0.3, Value: 0},
 	}
 
-	prizeResult, err := engine.DrawMultipleFromPrizesWithRecovery(ctx, "prize_recovery_demo", prizes, 8)
+	prizeResult, err := engine.DrawMultipleFromPrizes(ctx, "prize_recovery_demo", prizes, 8, nil)
 	if err != nil {
 		if prizeResult != nil && prizeResult.PartialSuccess {
 			fmt.Printf("⚠️  奖品抽奖部分成功: %d/%d 次\n",
@@ -126,7 +127,7 @@ func performanceOptimizationExample(ctx context.Context, rdb *redis.Client) {
 	engine := lottery.NewLotteryEngine(rdb)
 
 	// 定义进度回调函数
-	progressCallback := func(completed, total int, currentResult interface{}) {
+	progressCallback := func(completed, total int, currentResult any) {
 		progress := float64(completed) / float64(total) * 100
 		fmt.Printf("   进度: %.1f%% (%d/%d) - 当前结果: %v\n",
 			progress, completed, total, currentResult)
@@ -135,8 +136,7 @@ func performanceOptimizationExample(ctx context.Context, rdb *redis.Client) {
 	fmt.Println("开始优化连抽 (带进度显示):")
 
 	// 使用优化的连抽功能
-	result, err := engine.DrawMultipleInRangeOptimized(
-		ctx, "optimization_demo", 1, 100, 15, progressCallback)
+	result, err := engine.DrawMultipleInRange(ctx, "optimization_demo", 1, 100, 15, progressCallback)
 	if err != nil {
 		fmt.Printf("❌ 优化连抽失败: %v\n", err)
 		return
@@ -210,14 +210,14 @@ type CustomLogger struct {
 	prefix string
 }
 
-func (l *CustomLogger) Info(msg string, args ...interface{}) {
-	log.Printf("%s [INFO] "+msg, append([]interface{}{l.prefix}, args...)...)
+func (l *CustomLogger) Info(msg string, args ...any) {
+	log.Printf("%s [INFO] "+msg, append([]any{l.prefix}, args...)...)
 }
 
-func (l *CustomLogger) Error(msg string, args ...interface{}) {
-	log.Printf("%s [ERROR] "+msg, append([]interface{}{l.prefix}, args...)...)
+func (l *CustomLogger) Error(msg string, args ...any) {
+	log.Printf("%s [ERROR] "+msg, append([]any{l.prefix}, args...)...)
 }
 
-func (l *CustomLogger) Debug(msg string, args ...interface{}) {
-	log.Printf("%s [DEBUG] "+msg, append([]interface{}{l.prefix}, args...)...)
+func (l *CustomLogger) Debug(msg string, args ...any) {
+	log.Printf("%s [DEBUG] "+msg, append([]any{l.prefix}, args...)...)
 }

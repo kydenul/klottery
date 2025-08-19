@@ -73,7 +73,12 @@ func main() {
 }
 
 // runProductionExamples 运行生产环境示例
-func runProductionExamples(ctx context.Context, engine lottery.LotteryDrawer, recovery *lottery.ErrorRecovery, config *lottery.Config) {
+func runProductionExamples(
+	ctx context.Context,
+	engine lottery.LotteryDrawer,
+	recovery *lottery.ErrorRecovery,
+	config *lottery.Config,
+) {
 	fmt.Println("\n--- 生产环境抽奖示例 ---")
 
 	// 示例1: 带错误恢复的范围抽奖
@@ -106,7 +111,7 @@ func runProductionExamples(ctx context.Context, engine lottery.LotteryDrawer, re
 	results := make(chan *lottery.Prize, concurrentDraws)
 	errors := make(chan error, concurrentDraws)
 
-	for i := 0; i < concurrentDraws; i++ {
+	for i := range concurrentDraws {
 		go func(index int) {
 			err := recovery.ExecuteWithRetry(ctx, func() error {
 				prize, err := engine.DrawFromPrizes(ctx, fmt.Sprintf("prod:activity:concurrent_%d", index), prizes)
@@ -125,7 +130,7 @@ func runProductionExamples(ctx context.Context, engine lottery.LotteryDrawer, re
 	// 收集结果
 	successCount := 0
 	errorCount := 0
-	for i := 0; i < concurrentDraws; i++ {
+	for range concurrentDraws {
 		select {
 		case prize := <-results:
 			successCount++
@@ -144,7 +149,7 @@ func runProductionExamples(ctx context.Context, engine lottery.LotteryDrawer, re
 	// 示例3: 带状态恢复的批量抽奖
 	fmt.Println("\n3. 带状态恢复的批量抽奖")
 	err = recovery.ExecuteWithRetry(ctx, func() error {
-		result, err := engine.DrawMultipleInRangeWithRecovery(ctx, "prod:batch:recovery", 1, 100, 20)
+		result, err := engine.DrawMultipleInRange(ctx, "prod:batch:recovery", 1, 100, 20, nil)
 		if err != nil {
 			return err
 		}

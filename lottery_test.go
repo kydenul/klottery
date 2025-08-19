@@ -3,6 +3,7 @@ package lottery
 import (
 	"context"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -406,11 +407,11 @@ func TestLotteryEngine_BasicFunctionality(t *testing.T) {
 		engine := NewLotteryEngineWithLogger(rdb, NewSilentLogger())
 
 		// 范围连抽
-		results, err := engine.DrawMultipleInRange(ctx, "test_multi_range", 1, 10, 5)
+		results, err := engine.DrawMultipleInRange(ctx, "test_multi_range", 1, 10, 5, nil)
 		require.NoError(t, err)
-		assert.Len(t, results, 5)
+		assert.Len(t, results.Results, 5)
 
-		for _, result := range results {
+		for _, result := range results.Results {
 			assert.GreaterOrEqual(t, result, 1)
 			assert.LessOrEqual(t, result, 10)
 		}
@@ -421,11 +422,11 @@ func TestLotteryEngine_BasicFunctionality(t *testing.T) {
 			{ID: "b", Name: "奖品B", Probability: 0.5, Value: 50},
 		}
 
-		prizeResults, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_prizes", prizes, 3)
+		prizeResults, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_prizes", prizes, 3, nil)
 		require.NoError(t, err)
-		assert.Len(t, prizeResults, 3)
+		assert.Len(t, prizeResults.PrizeResults, 3)
 
-		for _, prize := range prizeResults {
+		for _, prize := range prizeResults.PrizeResults {
 			assert.Contains(t, []string{"a", "b"}, prize.ID)
 		}
 	})
@@ -991,12 +992,12 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 				defer wg.Done()
 
 				lockKey := fmt.Sprintf("multi_draw_range_%d", goroutineID)
-				drawResults, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 100, drawsPerGoroutine)
+				drawResults, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 100, drawsPerGoroutine, nil)
 
 				if err != nil {
 					errors[goroutineID] = err
 				} else {
-					results[goroutineID] = drawResults
+					results[goroutineID] = drawResults.Results
 				}
 			}(i)
 		}
@@ -1046,12 +1047,12 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 				defer wg.Done()
 
 				lockKey := fmt.Sprintf("multi_draw_prize_%d", goroutineID)
-				prizeResults, err := engine.DrawMultipleFromPrizes(ctx, lockKey, prizes, drawsPerGoroutine)
+				prizeResults, err := engine.DrawMultipleFromPrizes(ctx, lockKey, prizes, drawsPerGoroutine, nil)
 
 				if err != nil {
 					errors[goroutineID] = err
 				} else {
-					results[goroutineID] = prizeResults
+					results[goroutineID] = prizeResults.PrizeResults
 				}
 			}(i)
 		}
@@ -1102,13 +1103,13 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 				defer wg.Done()
 
 				startTimes[goroutineID] = time.Now()
-				drawResults, err := engine.DrawMultipleInRange(ctx, sameLockKey, 1, 50, drawsPerGoroutine)
+				drawResults, err := engine.DrawMultipleInRange(ctx, sameLockKey, 1, 50, drawsPerGoroutine, nil)
 				endTimes[goroutineID] = time.Now()
 
 				if err != nil {
 					errors[goroutineID] = err
 				} else {
-					results[goroutineID] = drawResults
+					results[goroutineID] = drawResults.Results
 				}
 			}(i)
 		}
@@ -1177,7 +1178,7 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 				defer wg.Done()
 
 				lockKey := fmt.Sprintf("recovery_draw_%d", goroutineID)
-				result, err := engine.DrawMultipleInRangeWithRecovery(ctx, lockKey, 1, 200, drawsPerGoroutine)
+				result, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 200, drawsPerGoroutine, nil)
 
 				results[goroutineID] = result
 				errors[goroutineID] = err
@@ -1270,10 +1271,10 @@ func TestLotteryEngine_FullIntegration(t *testing.T) {
 		assert.LessOrEqual(t, result, 100)
 
 		// 6. 测试多次范围抽奖
-		results, err := engine.DrawMultipleInRange(ctx, "integration_multi_range", 1, 10, 5)
+		results, err := engine.DrawMultipleInRange(ctx, "integration_multi_range", 1, 10, 5, nil)
 		require.NoError(t, err)
-		assert.Len(t, results, 5)
-		for _, r := range results {
+		assert.Len(t, results.Results, 5)
+		for _, r := range results.Results {
 			assert.GreaterOrEqual(t, r, 1)
 			assert.LessOrEqual(t, r, 10)
 		}
@@ -1291,10 +1292,10 @@ func TestLotteryEngine_FullIntegration(t *testing.T) {
 		assert.Contains(t, []string{"gold", "silver", "bronze"}, prize.ID)
 
 		// 8. 测试多次奖品抽奖
-		multiPrizes, err := engine.DrawMultipleFromPrizes(ctx, "integration_multi_prize", prizes, 10)
+		multiPrizes, err := engine.DrawMultipleFromPrizes(ctx, "integration_multi_prize", prizes, 10, nil)
 		require.NoError(t, err)
-		assert.Len(t, multiPrizes, 10)
-		for _, p := range multiPrizes {
+		assert.Len(t, multiPrizes.PrizeResults, 10)
+		for _, p := range multiPrizes.PrizeResults {
 			assert.NotNil(t, p)
 			assert.Contains(t, []string{"gold", "silver", "bronze"}, p.ID)
 		}
@@ -1501,13 +1502,7 @@ func TestLotteryEngine_CustomLogger(t *testing.T) {
 		assert.NotEmpty(t, mockLogger.ErrorMessages, "Should have error messages")
 
 		// 验证特定的日志内容
-		found := false
-		for _, msg := range mockLogger.ErrorMessages {
-			if msg == "DrawInRange failed: empty lock key" {
-				found = true
-				break
-			}
-		}
+		found := slices.Contains(mockLogger.ErrorMessages, "drawInRange failed: empty lock key")
 		assert.True(t, found, "Should log specific error message")
 	})
 }
@@ -1576,15 +1571,15 @@ func TestLotteryEngine_EdgeCases(t *testing.T) {
 		defer cancel()
 
 		// 测试在context取消时的行为
-		results, err := engine.DrawMultipleInRange(cancelCtx, "cancel_test", 1, 1000, 100)
+		results, err := engine.DrawMultipleInRange(cancelCtx, "cancel_test", 1, 1000, 100, nil)
 
 		// 应该返回部分结果或context错误
 		if err == context.DeadlineExceeded {
-			t.Logf("Context cancelled as expected, got %d partial results", len(results))
+			t.Logf("Context cancelled as expected, got %d partial results", len(results.Results))
 		} else {
 			// 如果操作完成得很快，也是正常的
 			require.NoError(t, err)
-			assert.Len(t, results, 100)
+			assert.Len(t, results.Results, 100)
 		}
 	})
 
@@ -1606,7 +1601,7 @@ func TestLotteryEngine_EdgeCases(t *testing.T) {
 				}
 				_, _ = engine.DrawFromPrizes(ctx, "memory_test", prizes)
 			case 2:
-				_, _ = engine.DrawMultipleInRange(ctx, "memory_test", 1, 10, 3)
+				_, _ = engine.DrawMultipleInRange(ctx, "memory_test", 1, 10, 3, nil)
 			}
 		}
 
@@ -2329,7 +2324,7 @@ func TestLotteryEngine_DrawMultipleInRangeOptimized(t *testing.T) {
 			assert.IsType(t, 0, currentResult) // Should be int for range draws
 		}
 
-		result, err := engine.DrawMultipleInRangeOptimized(ctx, "optimized_test_1", 1, 100, 20, progressCallback)
+		result, err := engine.DrawMultipleInRange(ctx, "optimized_test_1", 1, 100, 20, progressCallback)
 
 		require.NoError(t, err)
 		assert.NotNil(t, result)
@@ -2358,7 +2353,7 @@ func TestLotteryEngine_DrawMultipleInRangeOptimized(t *testing.T) {
 			cancel()
 		}()
 
-		result, err := engine.DrawMultipleInRangeOptimized(ctx, "optimized_test_2", 1, 100, 1000, nil)
+		result, err := engine.DrawMultipleInRange(ctx, "optimized_test_2", 1, 100, 1000, nil)
 
 		// Should get either ErrDrawInterrupted or context.Canceled
 		assert.Error(t, err)
@@ -2374,17 +2369,17 @@ func TestLotteryEngine_DrawMultipleInRangeOptimized(t *testing.T) {
 		ctx := context.Background()
 
 		// Empty lock key
-		result, err := engine.DrawMultipleInRangeOptimized(ctx, "", 1, 100, 5, nil)
+		result, err := engine.DrawMultipleInRange(ctx, "", 1, 100, 5, nil)
 		assert.Equal(t, ErrInvalidParameters, err)
 		assert.Nil(t, result)
 
 		// Invalid range
-		result, err = engine.DrawMultipleInRangeOptimized(ctx, "test", 100, 1, 5, nil)
+		result, err = engine.DrawMultipleInRange(ctx, "test", 100, 1, 5, nil)
 		assert.Equal(t, ErrInvalidRange, err)
 		assert.Nil(t, result)
 
 		// Invalid count
-		result, err = engine.DrawMultipleInRangeOptimized(ctx, "test", 1, 100, 0, nil)
+		result, err = engine.DrawMultipleInRange(ctx, "test", 1, 100, 0, nil)
 		assert.Equal(t, ErrInvalidCount, err)
 		assert.Nil(t, result)
 	})
@@ -2422,7 +2417,7 @@ func TestProgressCallback(t *testing.T) {
 			}{completed, total, currentResult})
 		}
 
-		result, err := engine.DrawMultipleInRangeOptimized(ctx, "progress_test", 1, 10, 5, progressCallback)
+		result, err := engine.DrawMultipleInRange(ctx, "progress_test", 1, 10, 5, progressCallback)
 
 		require.NoError(t, err)
 		assert.Equal(t, 5, result.Completed)
@@ -2457,7 +2452,7 @@ func BenchmarkLotteryEngine_DrawMultipleInRangeOptimized(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		lockKey := fmt.Sprintf("benchmark_optimized_%d", i)
-		_, err := engine.DrawMultipleInRangeOptimized(ctx, lockKey, 1, 1000, 50, nil)
+		_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, 50, nil)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -2484,7 +2479,7 @@ func BenchmarkLotteryEngine_DrawMultipleInRange_vs_Optimized(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			lockKey := fmt.Sprintf("benchmark_standard_%d", i)
-			_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, 20)
+			_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, 20, nil)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -2495,7 +2490,7 @@ func BenchmarkLotteryEngine_DrawMultipleInRange_vs_Optimized(b *testing.B) {
 		b.ResetTimer()
 		for i := 0; i < b.N; i++ {
 			lockKey := fmt.Sprintf("benchmark_optimized_%d", i)
-			_, err := engine.DrawMultipleInRangeOptimized(ctx, lockKey, 1, 1000, 20, nil)
+			_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, 20, nil)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -2633,12 +2628,12 @@ func TestLotteryEngine_DrawMultipleFromPrizes(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		results, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_1", prizes, 5)
+		results, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_1", prizes, 5, nil)
 		require.NoError(t, err)
-		assert.Len(t, results, 5)
+		assert.Len(t, results.PrizeResults, 5)
 
 		// All results should be valid prizes
-		for _, prize := range results {
+		for _, prize := range results.PrizeResults {
 			assert.Contains(t, []string{"1", "2"}, prize.ID)
 		}
 	})
@@ -2649,10 +2644,10 @@ func TestLotteryEngine_DrawMultipleFromPrizes(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		results, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_2", prizes, 1)
+		results, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_2", prizes, 1, nil)
 		require.NoError(t, err)
-		assert.Len(t, results, 1)
-		assert.Equal(t, "only", results[0].ID)
+		assert.Len(t, results.PrizeResults, 1)
+		assert.Equal(t, "only", results.PrizeResults[0].ID)
 	})
 
 	t.Run("Empty lock key", func(t *testing.T) {
@@ -2661,7 +2656,7 @@ func TestLotteryEngine_DrawMultipleFromPrizes(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		_, err := engine.DrawMultipleFromPrizes(ctx, "", prizes, 1)
+		_, err := engine.DrawMultipleFromPrizes(ctx, "", prizes, 1, nil)
 		assert.Equal(t, ErrInvalidParameters, err)
 	})
 
@@ -2669,7 +2664,7 @@ func TestLotteryEngine_DrawMultipleFromPrizes(t *testing.T) {
 		prizes := []Prize{}
 
 		ctx := context.Background()
-		_, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_3", prizes, 1)
+		_, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_3", prizes, 1, nil)
 		assert.Equal(t, ErrEmptyPrizePool, err)
 	})
 
@@ -2679,10 +2674,10 @@ func TestLotteryEngine_DrawMultipleFromPrizes(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		_, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_4", prizes, 0)
+		_, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_4", prizes, 0, nil)
 		assert.Equal(t, ErrInvalidCount, err)
 
-		_, err = engine.DrawMultipleFromPrizes(ctx, "test_multi_5", prizes, -1)
+		_, err = engine.DrawMultipleFromPrizes(ctx, "test_multi_5", prizes, -1, nil)
 		assert.Equal(t, ErrInvalidCount, err)
 	})
 
@@ -2693,7 +2688,7 @@ func TestLotteryEngine_DrawMultipleFromPrizes(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		_, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_6", prizes, 2)
+		_, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_6", prizes, 2, nil)
 		assert.Equal(t, ErrInvalidProbability, err)
 	})
 
@@ -2706,7 +2701,7 @@ func TestLotteryEngine_DrawMultipleFromPrizes(t *testing.T) {
 		defer cancel()
 
 		// This should either complete quickly or return partial results
-		results, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_7", prizes, 100)
+		results, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_7", prizes, 100, nil)
 
 		// Either we get an error (timeout/partial failure) or we get some results
 		if err != nil {
@@ -2714,7 +2709,7 @@ func TestLotteryEngine_DrawMultipleFromPrizes(t *testing.T) {
 			assert.True(t, err == context.DeadlineExceeded || err == context.Canceled || err == ErrPartialDrawFailure)
 		} else {
 			// If no error, we should have some results
-			assert.True(t, len(results) > 0)
+			assert.True(t, len(results.PrizeResults) > 0)
 		}
 	})
 
@@ -2725,14 +2720,14 @@ func TestLotteryEngine_DrawMultipleFromPrizes(t *testing.T) {
 		}
 
 		ctx := context.Background()
-		results, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_8", prizes, 1000)
+		results, err := engine.DrawMultipleFromPrizes(ctx, "test_multi_8", prizes, 10000, nil)
 		require.NoError(t, err)
-		assert.Len(t, results, 1000)
+		assert.Len(t, results.PrizeResults, 10000)
 
 		// Count occurrences
 		rareCount := 0
 		commonCount := 0
-		for _, prize := range results {
+		for _, prize := range results.PrizeResults {
 			switch prize.ID {
 			case "rare":
 				rareCount++
@@ -2743,15 +2738,15 @@ func TestLotteryEngine_DrawMultipleFromPrizes(t *testing.T) {
 
 		// Check approximate distribution (with more generous tolerance for randomness)
 		// Using 15% tolerance to account for statistical variance in random sampling
-		tolerance := 0.15     // 15% tolerance
-		expectedRare := 100   // 10% of 1000
-		expectedCommon := 900 // 90% of 1000
+		tolerance := 0.15      // 15% tolerance
+		expectedRare := 1000   // 10% of 1000
+		expectedCommon := 9000 // 90% of 1000
 
 		assert.InDelta(t, expectedRare, rareCount, float64(expectedRare)*tolerance)
 		assert.InDelta(t, expectedCommon, commonCount, float64(expectedCommon)*tolerance)
 
 		// Additional check: total should always be 1000
-		assert.Equal(t, 1000, rareCount+commonCount)
+		assert.Equal(t, 10000, rareCount+commonCount)
 
 		// Log actual distribution for debugging
 		t.Logf("Distribution: rare=%d (%.1f%%), common=%d (%.1f%%)",
@@ -2892,7 +2887,7 @@ func BenchmarkLotteryEngine_DrawMultipleFromPrizes(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, err := engine.DrawMultipleFromPrizes(ctx, "benchmark_multi_test", prizes, 10)
+		_, err := engine.DrawMultipleFromPrizes(ctx, "benchmark_multi_test", prizes, 10, nil)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -3491,12 +3486,12 @@ func TestLotteryEngine_DrawMultipleInRange(t *testing.T) {
 		count := 5
 		lockKey := "test_draw_multiple_1"
 
-		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count)
+		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count, nil)
 
 		require.NoError(t, err)
-		assert.Len(t, results, count)
+		assert.Len(t, results.Results, count)
 
-		for _, result := range results {
+		for _, result := range results.Results {
 			assert.GreaterOrEqual(t, result, min)
 			assert.LessOrEqual(t, result, max)
 		}
@@ -3507,12 +3502,12 @@ func TestLotteryEngine_DrawMultipleInRange(t *testing.T) {
 		count := 1
 		lockKey := "test_draw_multiple_2"
 
-		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count)
+		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count, nil)
 
 		require.NoError(t, err)
-		assert.Len(t, results, count)
-		assert.GreaterOrEqual(t, results[0], min)
-		assert.LessOrEqual(t, results[0], max)
+		assert.Len(t, results.Results, count)
+		assert.GreaterOrEqual(t, results.Results[0], min)
+		assert.LessOrEqual(t, results.Results[0], max)
 	})
 
 	t.Run("Invalid range", func(t *testing.T) {
@@ -3520,7 +3515,7 @@ func TestLotteryEngine_DrawMultipleInRange(t *testing.T) {
 		count := 5
 		lockKey := "test_draw_multiple_3"
 
-		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count)
+		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count, nil)
 
 		assert.Error(t, err)
 		assert.Equal(t, ErrInvalidRange, err)
@@ -3532,7 +3527,7 @@ func TestLotteryEngine_DrawMultipleInRange(t *testing.T) {
 		count := 0
 		lockKey := "test_draw_multiple_4"
 
-		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count)
+		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count, nil)
 
 		assert.Error(t, err)
 		assert.Equal(t, ErrInvalidCount, err)
@@ -3544,7 +3539,7 @@ func TestLotteryEngine_DrawMultipleInRange(t *testing.T) {
 		count := -5
 		lockKey := "test_draw_multiple_5"
 
-		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count)
+		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count, nil)
 
 		assert.Error(t, err)
 		assert.Equal(t, ErrInvalidCount, err)
@@ -3556,7 +3551,7 @@ func TestLotteryEngine_DrawMultipleInRange(t *testing.T) {
 		count := 5
 		lockKey := ""
 
-		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count)
+		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count, nil)
 
 		assert.Error(t, err)
 		assert.Equal(t, ErrInvalidParameters, err)
@@ -3568,13 +3563,13 @@ func TestLotteryEngine_DrawMultipleInRange(t *testing.T) {
 		count := 100
 		lockKey := "test_draw_multiple_6"
 
-		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count)
+		results, err := engine.DrawMultipleInRange(ctx, lockKey, min, max, count, nil)
 
 		require.NoError(t, err)
-		assert.Len(t, results, count)
+		assert.Len(t, results.Results, count)
 
 		// Check that all results are in range
-		for _, result := range results {
+		for _, result := range results.Results {
 			assert.GreaterOrEqual(t, result, min)
 			assert.LessOrEqual(t, result, max)
 		}
@@ -3700,7 +3695,7 @@ func BenchmarkLotteryEngine_DrawMultipleInRange(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _ = engine.DrawMultipleInRange(ctx, "benchmark_multiple", 1, 1000, 5)
+		_, _ = engine.DrawMultipleInRange(ctx, "benchmark_multiple", 1, 1000, 5, nil)
 	}
 }
 
