@@ -143,7 +143,7 @@ func (ps *DefaultPrizeSelector) SelectPrize(prizes []Prize) (*Prize, error) {
 	}
 
 	// Find the prize using binary search for efficiency
-	selectedIndex := ps.findPrizeIndex(cumulativeProbabilities, randomValue)
+	selectedIndex := findPrizeIndex(cumulativeProbabilities, randomValue)
 	if selectedIndex < 0 || selectedIndex >= len(normalizedPrizes) {
 		// Fallback to last prize if index is out of bounds
 		selectedIndex = len(normalizedPrizes) - 1
@@ -152,28 +152,6 @@ func (ps *DefaultPrizeSelector) SelectPrize(prizes []Prize) (*Prize, error) {
 	// Return a copy of the selected prize
 	selectedPrize := normalizedPrizes[selectedIndex]
 	return &selectedPrize, nil
-}
-
-// findPrizeIndex finds the index of the prize to select using binary search
-func (ps *DefaultPrizeSelector) findPrizeIndex(cumulativeProbabilities []float64, randomValue float64) int {
-	left, right := 0, len(cumulativeProbabilities)-1
-
-	// Binary search for the first cumulative probability >= randomValue
-	for left <= right {
-		mid := left + (right-left)/2
-		if cumulativeProbabilities[mid] >= randomValue {
-			// Check if this is the first occurrence
-			if mid == 0 || cumulativeProbabilities[mid-1] < randomValue {
-				return mid
-			}
-			right = mid - 1
-		} else {
-			left = mid + 1
-		}
-	}
-
-	// Fallback to the last index if not found
-	return len(cumulativeProbabilities) - 1
 }
 
 // ValidatePrizes validates that the prize pool probabilities are valid

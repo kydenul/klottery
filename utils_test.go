@@ -247,6 +247,27 @@ func TestUtilsEdgeCases(t *testing.T) {
 	})
 }
 
+func Test_findPrizeIndex(t *testing.T) {
+	t.Run("Find correct index", func(t *testing.T) {
+		cumulative := []float64{0.2, 0.5, 1.0}
+
+		// Test various random values
+		assert.Equal(t, 0, findPrizeIndex(cumulative, 0.0))
+		assert.Equal(t, 0, findPrizeIndex(cumulative, 0.1))
+		assert.Equal(t, 0, findPrizeIndex(cumulative, 0.2))
+		assert.Equal(t, 1, findPrizeIndex(cumulative, 0.3))
+		assert.Equal(t, 1, findPrizeIndex(cumulative, 0.5))
+		assert.Equal(t, 2, findPrizeIndex(cumulative, 0.7))
+		assert.Equal(t, 2, findPrizeIndex(cumulative, 1.0))
+	})
+
+	t.Run("Edge cases", func(t *testing.T) {
+		cumulative := []float64{1.0}
+		assert.Equal(t, 0, findPrizeIndex(cumulative, 0.5))
+		assert.Equal(t, 0, findPrizeIndex(cumulative, 1.0))
+	})
+}
+
 // ================================================================================
 // Logger Tests
 // ================================================================================

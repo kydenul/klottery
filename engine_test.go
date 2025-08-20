@@ -2856,7 +2856,7 @@ func TestLotteryEngine_DrawMultipleInRangeOptimized(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		// Cancel after a short delay
 		go func() {
-			time.Sleep(10 * time.Millisecond)
+			time.Sleep(3 * time.Millisecond)
 			cancel()
 		}()
 
@@ -3242,7 +3242,7 @@ func TestLotteryEngine_DrawMultipleFromPrizes(t *testing.T) {
 			{ID: "1", Name: "Prize 1", Probability: 1.0, Value: 100},
 		}
 
-		ctx, cancel := context.WithTimeout(context.Background(), 1*time.Millisecond)
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Microsecond)
 		defer cancel()
 
 		// This should either complete quickly or return partial results
@@ -3695,29 +3695,6 @@ func TestPrizeSelector_SelectMultiplePrizes(t *testing.T) {
 		prizes := []Prize{}
 		_, err := selector.SelectMultiplePrizes(prizes, 1)
 		assert.Equal(t, ErrEmptyPrizePool, err)
-	})
-}
-
-func TestPrizeSelector_findPrizeIndex(t *testing.T) {
-	selector := NewDefaultPrizeSelector()
-
-	t.Run("Find correct index", func(t *testing.T) {
-		cumulative := []float64{0.2, 0.5, 1.0}
-
-		// Test various random values
-		assert.Equal(t, 0, selector.findPrizeIndex(cumulative, 0.0))
-		assert.Equal(t, 0, selector.findPrizeIndex(cumulative, 0.1))
-		assert.Equal(t, 0, selector.findPrizeIndex(cumulative, 0.2))
-		assert.Equal(t, 1, selector.findPrizeIndex(cumulative, 0.3))
-		assert.Equal(t, 1, selector.findPrizeIndex(cumulative, 0.5))
-		assert.Equal(t, 2, selector.findPrizeIndex(cumulative, 0.7))
-		assert.Equal(t, 2, selector.findPrizeIndex(cumulative, 1.0))
-	})
-
-	t.Run("Edge cases", func(t *testing.T) {
-		cumulative := []float64{1.0}
-		assert.Equal(t, 0, selector.findPrizeIndex(cumulative, 0.5))
-		assert.Equal(t, 0, selector.findPrizeIndex(cumulative, 1.0))
 	})
 }
 

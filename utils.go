@@ -59,3 +59,20 @@ func calculateOptimalBatchSize(totalCount int) int {
 		return 100 // Large batches for very large counts
 	}
 }
+
+// findPrizeIndex 使用二分查找定位奖品索引
+func findPrizeIndex(cumulativeProbabilities []float64, randomValue float64) int {
+	left, right := 0, len(cumulativeProbabilities)-1
+	for left <= right {
+		mid := left + (right-left)/2
+		if cumulativeProbabilities[mid] >= randomValue {
+			if mid == 0 || cumulativeProbabilities[mid-1] < randomValue {
+				return mid
+			}
+			right = mid - 1
+		} else {
+			left = mid + 1
+		}
+	}
+	return len(cumulativeProbabilities) - 1
+}
