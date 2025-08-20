@@ -73,7 +73,7 @@ type LotteryEngine struct {
 	lockCache          sync.Map // 锁缓存，用于快速路径优化
 
 	// Reused resources to reduce allocations on hot paths
-	random        *SecureRandomGenerator
+	fastRandom    *SecureRandomGenerator
 	prizeSelector *DefaultPrizeSelector
 }
 
@@ -117,7 +117,7 @@ func NewLotteryEngine(redisClient *redis.Client) *LotteryEngine {
 
 		circuitBreaker:     breaker,
 		performanceMonitor: NewPerformanceMonitor(),
-		random:             NewSecureRandomGenerator(),
+		fastRandom:         NewSecureRandomGenerator(),
 		prizeSelector:      NewDefaultPrizeSelector(),
 	}
 }
@@ -161,7 +161,7 @@ func NewLotteryEngineWithConfig(redisClient *redis.Client, cm *ConfigManager) *L
 
 		circuitBreaker:     breaker,
 		performanceMonitor: NewPerformanceMonitor(),
-		random:             NewSecureRandomGenerator(),
+		fastRandom:         NewSecureRandomGenerator(),
 		prizeSelector:      NewDefaultPrizeSelector(),
 	}
 }
@@ -207,7 +207,7 @@ func NewLotteryEngineWithLogger(redisClient *redis.Client, logger Logger) *Lotte
 
 		circuitBreaker:     breaker,
 		performanceMonitor: NewPerformanceMonitor(),
-		random:             NewSecureRandomGenerator(),
+		fastRandom:         NewSecureRandomGenerator(),
 		prizeSelector:      NewDefaultPrizeSelector(),
 	}
 }
@@ -253,7 +253,7 @@ func NewLotteryEngineWithConfigAndLogger(
 
 		circuitBreaker:     breaker,
 		performanceMonitor: NewPerformanceMonitor(),
-		random:             NewSecureRandomGenerator(),
+		fastRandom:         NewSecureRandomGenerator(),
 		prizeSelector:      NewDefaultPrizeSelector(),
 	}
 }
@@ -481,7 +481,7 @@ func (e *LotteryEngine) doDrawInRange(ctx context.Context, lockKey string, min, 
 	}()
 
 	// Generate secure random number in range
-	result, err := e.random.GenerateInRange(min, max)
+	result, err := e.fastRandom.GenerateInRange(min, max)
 	if err != nil {
 		e.logger.Error("drawInRange random generation failed: %v", err)
 		return 0, err
@@ -713,7 +713,7 @@ func (e *LotteryEngine) drawMultipleInRangeWithLockCache(
 	lockManager := e.lockManager
 	e.mu.RUnlock()
 
-	generator := e.random
+	generator := e.fastRandom
 
 	// Determine batch size for optimization
 	batchSize := calculateOptimalBatchSize(count)
@@ -1026,7 +1026,7 @@ func (e *LotteryEngine) drawMultipleFromPrizesWithLockCache(ctx context.Context,
 				drawState.LastUpdateTime = time.Now().Unix()
 
 				// 执行奖品选择（使用预计算累积概率）
-				randomValue, randErr := e.random.GenerateFloat()
+				randomValue, randErr := e.fastRandom.GenerateFloat()
 				if randErr != nil {
 					e.logger.Error("DrawMultipleFromPrizes random error at draw %d: %v", drawIndex+1, randErr)
 					drawError := DrawError{
@@ -1129,7 +1129,7 @@ func (e *LotteryEngine) drawMultipleFromPrizesWithLockCache(ctx context.Context,
 
 				// 执行奖品选择（使用预计算的累积概率）
 				var selectedPrize *Prize
-				randomValue, err := e.random.GenerateFloat()
+				randomValue, err := e.fastRandom.GenerateFloat()
 				if err == nil {
 					idx := findPrizeIndex(cumulativeProbabilities, randomValue)
 					sp := normalizedPrizes[idx]

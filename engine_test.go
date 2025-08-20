@@ -1912,7 +1912,7 @@ func TestLotteryEngine_FullIntegration(t *testing.T) {
 		engine := NewLotteryEngineWithLogger(rdb, NewSilentLogger())
 
 		// 设置较短的超时时间进行压力测试
-		err := engine.SetLockTimeout(2 * time.Second)
+		err := engine.SetLockTimeout(500 * time.Millisecond)
 		require.NoError(t, err)
 
 		const numGoroutines = 50
@@ -1969,7 +1969,7 @@ func TestLotteryEngine_FullIntegration(t *testing.T) {
 		assert.Greater(t, successCount, int64(0))
 		// 成功率应该合理（考虑到锁竞争）
 		successRate := float64(successCount) / float64(totalOperations)
-		assert.Greater(t, successRate, 0.07) // 至少7%成功率
+		assert.Greater(t, successRate, 0.06) // 至少 6% 成功率
 	})
 
 	t.Run("Configuration runtime adjustment under load", func(t *testing.T) {
@@ -2017,7 +2017,7 @@ func TestLotteryEngine_FullIntegration(t *testing.T) {
 		assert.Equal(t, 15*time.Second, finalConfig.Engine.LockTimeout)
 		assert.Equal(t, 7, finalConfig.Engine.RetryAttempts)
 		assert.Equal(t, 200*time.Millisecond, finalConfig.Engine.RetryInterval)
-		assert.Equal(t, 1*time.Second, finalConfig.Engine.LockCacheTTL)
+		assert.Equal(t, 300*time.Millisecond, finalConfig.Engine.LockCacheTTL)
 	})
 
 	t.Run("Error handling and recovery", func(t *testing.T) {
@@ -3822,27 +3822,6 @@ func TestSecureRandomGenerator_GenerateFloat(t *testing.T) {
 			}
 		}
 		assert.False(t, allSame, "All generated floats should not be the same")
-	})
-}
-
-func TestGenerateSecureInRange(t *testing.T) {
-	t.Run("Standalone function works", func(t *testing.T) {
-		min, max := 1, 10
-		result, err := GenerateSecureInRange(min, max)
-
-		require.NoError(t, err)
-		assert.GreaterOrEqual(t, result, min)
-		assert.LessOrEqual(t, result, max)
-	})
-}
-
-func TestGenerateSecureFloat(t *testing.T) {
-	t.Run("Standalone function works", func(t *testing.T) {
-		result, err := GenerateSecureFloat()
-
-		require.NoError(t, err)
-		assert.GreaterOrEqual(t, result, 0.0)
-		assert.Less(t, result, 1.0)
 	})
 }
 

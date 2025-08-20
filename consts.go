@@ -3,6 +3,12 @@ package lottery
 import "time"
 
 const (
+	// DefaultFastRandomGeneratorCacheSize is the default cache size for fast random generator
+	DefaultFastRandomGeneratorCacheSize = 1000
+)
+
+const (
+
 	// DefaultLockTimeout is the default timeout for acquiring distributed locks
 	DefaultLockTimeout = 30 * time.Second
 
@@ -13,7 +19,7 @@ const (
 	DefaultRetryInterval = 100 * time.Millisecond
 
 	// DefaultLockCacheTTL is the default TTL for cache of distributed locks
-	DefaultLockCacheTTL = 1 * time.Second
+	DefaultLockCacheTTL = 300 * time.Millisecond
 
 	// LockKeyPrefix is the prefix for Redis lock keys
 	LockKeyPrefix = "lottery:lock:"
@@ -28,13 +34,13 @@ const (
 	MaxRetryAttempts = 10
 
 	// MinLockTimeout is the minimum lock timeout allowed
-	MinLockTimeout = 1 * time.Second
+	MinLockTimeout = 100 * time.Millisecond
 
 	// MaxLockTimeout is the maximum lock timeout allowed
 	MaxLockTimeout = 5 * time.Minute
 
 	// MinLockCacheTTL is the minimum TTL for lock cache
-	MinLockCacheTTL = 1 * time.Second
+	MinLockCacheTTL = 100 * time.Millisecond
 
 	// MaxLockCacheTTL is the maximum TTL for lock cache
 	MaxLockCacheTTL = 5 * time.Minute

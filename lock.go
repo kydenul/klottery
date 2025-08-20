@@ -54,8 +54,7 @@ func NewLockManager(redisClient *redis.Client, lockTimeout time.Duration) *Distr
 
 // NewLockManagerWithRetry creates a new distributed lock manager with custom retry settings
 func NewLockManagerWithRetry(
-	redisClient *redis.Client,
-	lockTimeout time.Duration, retryAttempts int, retryInterval, lockCacheTTL time.Duration,
+	redisClient *redis.Client, lockTimeout time.Duration, retryAttempts int, retryInterval, lockCacheTTL time.Duration,
 ) *DistributedLockManager {
 	return &DistributedLockManager{
 		redisClient:   redisClient,
@@ -70,8 +69,7 @@ func NewLockManagerWithRetry(
 
 // NewBatchDistributedLockManager creates a new batch lock manager
 func NewBatchLockManager(
-	redisClient *redis.Client,
-	lockTimeout time.Duration, retryAttempts int, retryInterval, lockCacheTTL time.Duration,
+	redisClient *redis.Client, lockTimeout time.Duration, retryAttempts int, retryInterval, lockCacheTTL time.Duration,
 ) *DistributedLockManager {
 	return &DistributedLockManager{
 		redisClient:   redisClient,
@@ -85,7 +83,9 @@ func NewBatchLockManager(
 }
 
 // AcquireLock attempts to acquire a distributed lock using SET NX for optimal performance
-func (m *DistributedLockManager) AcquireLock(ctx context.Context, lockKey, lockValue string, expireTime time.Duration) (bool, error) {
+func (m *DistributedLockManager) AcquireLock(
+	ctx context.Context, lockKey, lockValue string, expireTime time.Duration,
+) (bool, error) {
 	if lockKey == "" {
 		return false, ErrInvalidParameters
 	}
