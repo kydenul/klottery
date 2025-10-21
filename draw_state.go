@@ -259,7 +259,7 @@ func generateStateKey(lockKey string) string {
 }
 
 // parseStateKey parses a state key to extract the lock key and operation ID
-func parseStateKey(key string) (lockKey string, operationID string, err error) {
+func parseStateKey(key string) (lockKey, operationID string, err error) {
 	if !strings.HasPrefix(key, StateKeyPrefix) {
 		return "", "", fmt.Errorf("invalid state key format: missing prefix")
 	}

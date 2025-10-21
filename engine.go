@@ -698,6 +698,8 @@ func (e *LotteryEngine) drawMultipleInRangeWithLockCache(
 		LastUpdateTime: time.Now().Unix(),
 	}
 
+	e.logger.Info("drawState initialized: %+v", drawState)
+
 	// Initialize result structure
 	result := &MultiDrawResult{
 		Results:        make([]int, 0, count),
@@ -741,7 +743,7 @@ func (e *LotteryEngine) drawMultipleInRangeWithLockCache(
 		batchAcquired, batchErr := lockManager.AcquireLock(ctx, lockKey, batchLockValue, DefaultLockExpiration)
 		if batchErr == nil && batchAcquired {
 			// Process without per-draw locking
-			for i := 0; i < currentBatchSize; i++ {
+			for i := range currentBatchSize {
 				drawIndex := batchStart + i
 
 				drawResult, err := generator.GenerateInRange(min, max)
@@ -780,7 +782,7 @@ func (e *LotteryEngine) drawMultipleInRangeWithLockCache(
 			}
 		} else {
 			// Fallback to per-draw locking on failure
-			for i := 0; i < currentBatchSize; i++ {
+			for i := range currentBatchSize {
 				drawIndex := batchStart + i
 
 				// Generate a unique lock value for this draw
@@ -955,6 +957,8 @@ func (e *LotteryEngine) drawMultipleFromPrizesWithLockCache(ctx context.Context,
 		LastUpdateTime: time.Now().Unix(),
 	}
 
+	e.logger.Info("drawState=%+v", drawState)
+
 	// 初始化结果结构
 	result := &MultiDrawResult{
 		TotalRequested: count,
@@ -997,10 +1001,7 @@ func (e *LotteryEngine) drawMultipleFromPrizesWithLockCache(ctx context.Context,
 
 	// 分批处理，每批内部仍然逐个处理以保证细粒度控制
 	for batchStart := 0; batchStart < count; batchStart += batchSize {
-		batchEnd := batchStart + batchSize
-		if batchEnd > count {
-			batchEnd = count
-		}
+		batchEnd := min(batchStart+batchSize, count)
 		currentBatchSize := batchEnd - batchStart
 
 		// 检查上下文取消
@@ -1018,7 +1019,7 @@ func (e *LotteryEngine) drawMultipleFromPrizesWithLockCache(ctx context.Context,
 		batchAcquired, batchErr := lockManager.AcquireLock(ctx, lockKey, batchLockValue, DefaultLockExpiration)
 		if batchErr == nil && batchAcquired {
 			batchSuccesses := 0
-			for i := 0; i < currentBatchSize; i++ {
+			for i := range currentBatchSize {
 				drawIndex := batchStart + i
 
 				// 更新状态
@@ -1074,7 +1075,7 @@ func (e *LotteryEngine) drawMultipleFromPrizesWithLockCache(ctx context.Context,
 				batchSuccesses, currentBatchSize, batchStart)
 		} else {
 			batchSuccesses := 0
-			for i := 0; i < currentBatchSize; i++ {
+			for i := range currentBatchSize {
 				drawIndex := batchStart + i
 
 				// 更新状态
