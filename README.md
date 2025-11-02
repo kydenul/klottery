@@ -732,8 +732,8 @@ type AutoScaler struct {
 
 ## 📞 联系我们
 
-- **项目主页**: <https://github.com/kydenul/lottery>
-- **问题反馈**: <https://github.com/kydenul/lottery/issues>
+- **项目主页**: <https://github.com/kydenul/klottery>
+- **问题反馈**: <https://github.com/kydenul/klottery/issues>
 - **邮箱**: <kydenul@example.com>
 
 ---

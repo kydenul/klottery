@@ -3,6 +3,7 @@ package lottery
 import (
 	"context"
 	"fmt"
+	"math"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -1477,7 +1478,7 @@ func TestConcurrentLottery(t *testing.T) {
 				defer wg.Done()
 
 				goroutineResults := make([]*Prize, numDrawsPerGoroutine)
-				for j := 0; j < numDrawsPerGoroutine; j++ {
+				for j := range numDrawsPerGoroutine {
 					lockKey := fmt.Sprintf("concurrent_prize_%d_%d", goroutineID, j)
 					prize, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
 					if err != nil {
@@ -1496,7 +1497,7 @@ func TestConcurrentLottery(t *testing.T) {
 		successCount := 0
 		prizeDistribution := make(map[string]int)
 
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			if errors[i] == nil {
 				successCount++
 				assert.Len(t, results[i], numDrawsPerGoroutine)
@@ -1526,7 +1527,7 @@ func TestConcurrentLottery(t *testing.T) {
 		acquisitionTimes := make([]time.Time, numGoroutines)
 
 		// 多个协程尝试获取同一个锁
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
 			go func(goroutineID int) {
 				defer wg.Done()
@@ -1551,7 +1552,7 @@ func TestConcurrentLottery(t *testing.T) {
 
 		// 验证只有一个协程能获取到锁（在任何给定时间）
 		successfulAcquisitions := 0
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			if acquisitionResults[i] {
 				successfulAcquisitions++
 			}
@@ -1593,7 +1594,7 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 		errors := make([]error, numGoroutines)
 
 		// 启动多个协程进行并发连续抽奖
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
 			go func(goroutineID int) {
 				defer wg.Done()
@@ -1613,7 +1614,7 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 
 		// 验证结果
 		successCount := 0
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			if errors[i] == nil {
 				successCount++
 				assert.Len(t, results[i], drawsPerGoroutine)
@@ -1648,7 +1649,7 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 		errors := make([]error, numGoroutines)
 
 		// 启动多个协程进行并发连续奖品抽奖
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
 			go func(goroutineID int) {
 				defer wg.Done()
@@ -1670,7 +1671,7 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 		successCount := 0
 		totalPrizes := 0
 
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			if errors[i] == nil {
 				successCount++
 				assert.Len(t, results[i], drawsPerGoroutine)
@@ -1704,7 +1705,7 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 		endTimes := make([]time.Time, numGoroutines)
 
 		// 启动多个协程使用相同锁键进行连续抽奖
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
 			go func(goroutineID int) {
 				defer wg.Done()
@@ -1725,7 +1726,7 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 
 		// 验证结果
 		successCount := 0
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			if errors[i] == nil {
 				successCount++
 				assert.Len(t, results[i], drawsPerGoroutine)
@@ -1744,7 +1745,7 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 			serializedPairs := 0
 			totalPairs := 0
 
-			for i := 0; i < numGoroutines-1; i++ {
+			for i := range numGoroutines - 1 {
 				for j := i + 1; j < numGoroutines; j++ {
 					if errors[i] == nil && errors[j] == nil {
 						totalPairs++
@@ -1779,7 +1780,7 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 		errors := make([]error, numGoroutines)
 
 		// 启动多个协程进行带错误恢复的连续抽奖
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			wg.Add(1)
 			go func(goroutineID int) {
 				defer wg.Done()
@@ -1798,7 +1799,7 @@ func TestMultiDrawThreadSafety(t *testing.T) {
 		successCount := 0
 		partialSuccessCount := 0
 
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			if results[i] != nil {
 				if errors[i] == nil {
 					successCount++
@@ -1981,7 +1982,7 @@ func TestLotteryEngine_FullIntegration(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			for i := 0; i < 100; i++ {
+			for range 100 {
 				_, _ = engine.DrawInRange(ctx, "config_test", 1, 100)
 				time.Sleep(10 * time.Millisecond)
 			}
@@ -2196,7 +2197,7 @@ func TestLotteryEngine_EdgeCases(t *testing.T) {
 		// 执行大量操作来测试内存管理
 		const iterations = 1000
 
-		for i := 0; i < iterations; i++ {
+		for i := range iterations {
 			// 交替执行不同类型的抽奖
 			switch i % 3 {
 			case 0:
@@ -2830,7 +2831,7 @@ func TestLotteryEngine_DrawMultipleInRangeOptimized(t *testing.T) {
 		ctx := context.Background()
 		// Track progress
 		var progressUpdates int32
-		progressCallback := func(completed, total int, currentResult interface{}) {
+		progressCallback := func(completed, total int, currentResult any) {
 			atomic.AddInt32(&progressUpdates, 1)
 			assert.LessOrEqual(t, completed, total)
 			assert.IsType(t, 0, currentResult) // Should be int for range draws
@@ -2951,14 +2952,14 @@ func TestProgressCallback(t *testing.T) {
 		var callbackData []struct {
 			completed int
 			total     int
-			result    interface{}
+			result    any
 		}
 
-		progressCallback := func(completed, total int, currentResult interface{}) {
+		progressCallback := func(completed, total int, currentResult any) {
 			callbackData = append(callbackData, struct {
 				completed int
 				total     int
-				result    interface{}
+				result    any
 			}{completed, total, currentResult})
 		}
 
@@ -2994,8 +2995,7 @@ func BenchmarkLotteryEngine_DrawMultipleInRangeOptimized(b *testing.B) {
 	engine := NewLotteryEngineWithLogger(rdb, NewSilentLogger())
 	ctx := context.Background()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i := 0; b.Loop(); i++ {
 		lockKey := fmt.Sprintf("benchmark_optimized_%d", i)
 		_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, 50, nil)
 		if err != nil {
@@ -3022,7 +3022,7 @@ func BenchmarkLotteryEngine_DrawMultipleInRange_vs_Optimized(b *testing.B) {
 
 	b.Run("Standard", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for i := 0; b.Loop(); i++ {
 			lockKey := fmt.Sprintf("benchmark_standard_%d", i)
 			_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, 20, nil)
 			if err != nil {
@@ -3033,7 +3033,7 @@ func BenchmarkLotteryEngine_DrawMultipleInRange_vs_Optimized(b *testing.B) {
 
 	b.Run("Optimized", func(b *testing.B) {
 		b.ResetTimer()
-		for i := 0; i < b.N; i++ {
+		for i := 0; b.Loop(); i++ {
 			lockKey := fmt.Sprintf("benchmark_optimized_%d", i)
 			_, err := engine.DrawMultipleInRange(ctx, lockKey, 1, 1000, 20, nil)
 			if err != nil {
@@ -3333,9 +3333,9 @@ func TestLotteryEngine_ConcurrentPrizeDraws(t *testing.T) {
 		errors := make(chan error, numGoroutines*drawsPerGoroutine)
 
 		// Launch concurrent goroutines
-		for i := 0; i < numGoroutines; i++ {
+		for i := range numGoroutines {
 			go func(goroutineID int) {
-				for j := 0; j < drawsPerGoroutine; j++ {
+				for range drawsPerGoroutine {
 					ctx := context.Background()
 					lockKey := "concurrent_test"
 					prize, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
@@ -3351,7 +3351,7 @@ func TestLotteryEngine_ConcurrentPrizeDraws(t *testing.T) {
 		// Collect results
 		var successCount int
 		var errorCount int
-		for i := 0; i < numGoroutines*drawsPerGoroutine; i++ {
+		for range numGoroutines * drawsPerGoroutine {
 			select {
 			case prize := <-results:
 				assert.Contains(t, []string{"1", "2"}, prize.ID)
@@ -3396,8 +3396,7 @@ func BenchmarkLotteryEngine_DrawFromPrizes(b *testing.B) {
 
 	ctx := context.Background()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := engine.DrawFromPrizes(ctx, "benchmark_test", prizes)
 		if err != nil {
 			b.Fatal(err)
@@ -3430,8 +3429,7 @@ func BenchmarkLotteryEngine_DrawMultipleFromPrizes(b *testing.B) {
 
 	ctx := context.Background()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := engine.DrawMultipleFromPrizes(ctx, "benchmark_multi_test", prizes, 10, nil)
 		if err != nil {
 			b.Fatal(err)
@@ -3558,7 +3556,7 @@ func TestPrizeSelector_SelectPrize(t *testing.T) {
 		selections := make(map[string]int)
 		iterations := 10000
 
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			prize, err := selector.SelectPrize(prizes)
 			require.NoError(t, err)
 			require.NotNil(t, prize)
@@ -3708,8 +3706,7 @@ func BenchmarkPrizeSelector_SelectPrize(b *testing.B) {
 		{ID: "4", Name: "Prize 4", Probability: 0.4, Value: 10},
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := selector.SelectPrize(prizes)
 		if err != nil {
 			b.Fatal(err)
@@ -3726,8 +3723,7 @@ func BenchmarkPrizeSelector_SelectMultiplePrizes(b *testing.B) {
 		{ID: "4", Name: "Prize 4", Probability: 0.4, Value: 10},
 	}
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, err := selector.SelectMultiplePrizes(prizes, 10)
 		if err != nil {
 			b.Fatal(err)
@@ -3807,7 +3803,7 @@ func TestSecureRandomGenerator_GenerateFloat(t *testing.T) {
 
 	t.Run("Multiple generations are different", func(t *testing.T) {
 		results := make([]float64, 100)
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			result, err := generator.GenerateFloat()
 			require.NoError(t, err)
 			results[i] = result
@@ -3829,8 +3825,7 @@ func TestSecureRandomGenerator_GenerateFloat(t *testing.T) {
 func BenchmarkSecureRandomGenerator_GenerateInRange(b *testing.B) {
 	generator := NewSecureRandomGenerator()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = generator.GenerateInRange(1, 1000)
 	}
 }
@@ -3838,8 +3833,7 @@ func BenchmarkSecureRandomGenerator_GenerateInRange(b *testing.B) {
 func BenchmarkSecureRandomGenerator_GenerateFloat(b *testing.B) {
 	generator := NewSecureRandomGenerator()
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = generator.GenerateFloat()
 	}
 }
@@ -3853,7 +3847,7 @@ func TestSecureRandomGenerator_Distribution(t *testing.T) {
 		counts := make(map[int]int)
 		iterations := 10000
 
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			result, err := generator.GenerateInRange(min, max)
 			require.NoError(t, err)
 			counts[result]++
@@ -3875,7 +3869,7 @@ func TestSecureRandomGenerator_Distribution(t *testing.T) {
 		iterations := 10000
 		var sum float64
 
-		for i := 0; i < iterations; i++ {
+		for range iterations {
 			result, err := generator.GenerateFloat()
 			require.NoError(t, err)
 			sum += result
@@ -4100,7 +4094,7 @@ func TestLotteryEngine_DrawInRange_Concurrent(t *testing.T) {
 		errors := make(chan error, numGoroutines)
 
 		// Start multiple goroutines
-		for i := 0; i < numGoroutines; i++ {
+		for range numGoroutines {
 			go func() {
 				result, err := engine.DrawInRange(ctx, lockKey, min, max)
 				if err != nil {
@@ -4115,7 +4109,7 @@ func TestLotteryEngine_DrawInRange_Concurrent(t *testing.T) {
 		var successCount int
 		var errorCount int
 
-		for i := 0; i < numGoroutines; i++ {
+		for range numGoroutines {
 			select {
 			case result := <-results:
 				assert.GreaterOrEqual(t, result, min)
@@ -4140,7 +4134,7 @@ func TestGenerateLockValue(t *testing.T) {
 	t.Run("Generate unique lock values", func(t *testing.T) {
 		values := make(map[string]bool)
 
-		for i := 0; i < 1000; i++ {
+		for range 1000 {
 			value := generateLockValue()
 			assert.NotEmpty(t, value)
 			assert.False(t, values[value], "Lock value should be unique: %s", value)
@@ -4175,8 +4169,7 @@ func BenchmarkLotteryEngine_DrawInRange(b *testing.B) {
 
 	engine := NewLotteryEngineWithLogger(client, NewSilentLogger())
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = engine.DrawInRange(ctx, "benchmark_draw", 1, 1000)
 	}
 }
@@ -4194,8 +4187,7 @@ func BenchmarkLotteryEngine_DrawMultipleInRange(b *testing.B) {
 
 	engine := NewLotteryEngineWithLogger(client, NewSilentLogger())
 
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for b.Loop() {
 		_, _ = engine.DrawMultipleInRange(ctx, "benchmark_multiple", 1, 1000, 5, nil)
 	}
 }
@@ -4462,4 +4454,413 @@ func TestValidateCount(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestDrawFromPrizes_BoundaryConditions 测试 DrawFromPrizes 函数的边界情况
+func TestDrawFromPrizes_BoundaryConditions(t *testing.T) {
+	// Setup Redis client for testing
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+		DB:   1, // Use test database
+	})
+
+	// Clean up test keys
+	defer func() {
+		rdb.FlushDB(context.Background())
+		rdb.Close()
+	}()
+
+	// Test Redis connection
+	_, err := rdb.Ping(context.Background()).Result()
+	if err != nil {
+		t.Skip("Redis not available, skipping integration tests")
+	}
+
+	engine := NewLotteryEngineWithLogger(rdb, NewSilentLogger())
+	ctx := context.Background()
+
+	t.Run("Single prize with probability 1.0", func(t *testing.T) {
+		prizes := []Prize{
+			{ID: "certain", Name: "Certain Prize", Probability: 1.0, Value: 100},
+		}
+
+		// 多次抽奖验证结果的一致性
+		for i := range 10 {
+			lockKey := "test_prob_1_0_" + string(rune(i))
+			prize, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
+			require.NoError(t, err)
+			require.NotNil(t, prize)
+			assert.Equal(t, "certain", prize.ID)
+			assert.Equal(t, "Certain Prize", prize.Name)
+			assert.Equal(t, 1.0, prize.Probability)
+			assert.Equal(t, 100, prize.Value)
+		}
+	})
+
+	t.Run("Multiple prizes with one having probability 1.0", func(t *testing.T) {
+		prizes := []Prize{
+			{ID: "certain", Name: "Certain Prize", Probability: 1.0, Value: 100},
+			{ID: "impossible", Name: "Impossible Prize", Probability: 0.0, Value: 200},
+		}
+
+		// 多次抽奖验证只能抽到概率为1.0的奖品
+		for i := range 2_0000 {
+			lockKey := "test_mixed_prob_" + string(rune(i))
+			prize, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
+			require.NoError(t, err)
+			require.NotNil(t, prize)
+			// 由于概率归一化，应该总是抽到 "certain" 奖品
+			assert.Equal(t, "certain", prize.ID)
+		}
+	})
+
+	t.Run("All prizes with probability 0.0 - should fail", func(t *testing.T) {
+		prizes := []Prize{
+			{ID: "impossible1", Name: "Impossible Prize 1", Probability: 0.0, Value: 100},
+			{ID: "impossible2", Name: "Impossible Prize 2", Probability: 0.0, Value: 200},
+		}
+
+		_, err := engine.DrawFromPrizes(ctx, "test_all_zero_prob", prizes)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidProbability, err)
+	})
+
+	t.Run("Prizes with very small probabilities", func(t *testing.T) {
+		prizes := []Prize{
+			{ID: "tiny1", Name: "Tiny Prize 1", Probability: 0.0001, Value: 100},
+			{ID: "tiny2", Name: "Tiny Prize 2", Probability: 0.9999, Value: 200},
+		}
+
+		// 统计抽奖结果分布
+		results := make(map[string]int)
+		totalDraws := 10_0000
+
+		for i := range totalDraws {
+			lockKey := "test_tiny_prob_" + string(rune(i%100)) + "_" + string(rune(i/100))
+			prize, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
+			require.NoError(t, err)
+			require.NotNil(t, prize)
+			results[prize.ID]++
+		}
+
+		// 验证结果分布符合预期（tiny2 应该占绝大多数）
+		assert.Greater(t, results["tiny2"], totalDraws*8/10) // 至少80%
+		assert.Less(t, results["tiny1"], totalDraws*2/10)    // 最多20%
+		assert.Equal(t, totalDraws, results["tiny1"]+results["tiny2"])
+	})
+
+	t.Run("Probability exactly at tolerance boundary", func(t *testing.T) {
+		// 测试概率总和刚好在容差边界的情况
+		tolerance := ProbabilityTolerance // 0.0001
+
+		t.Run("Sum slightly below 1.0 - within tolerance", func(t *testing.T) {
+			prizes := []Prize{
+				{ID: "prize1", Name: "Prize 1", Probability: 0.5 - tolerance/2, Value: 100},
+				{ID: "prize2", Name: "Prize 2", Probability: 0.5 - tolerance/2, Value: 200},
+			}
+			// 总和 = 1.0 - tolerance，应该在容差范围内
+
+			prize, err := engine.DrawFromPrizes(ctx, "test_tolerance_below", prizes)
+			require.NoError(t, err)
+			require.NotNil(t, prize)
+			assert.Contains(t, []string{"prize1", "prize2"}, prize.ID)
+		})
+
+		t.Run("Sum slightly above 1.0 - within tolerance", func(t *testing.T) {
+			prizes := []Prize{
+				{ID: "prize1", Name: "Prize 1", Probability: 0.5 + tolerance/2, Value: 100},
+				{ID: "prize2", Name: "Prize 2", Probability: 0.5 + tolerance/2, Value: 200},
+			}
+			// 总和 = 1.0 + tolerance，应该在容差范围内
+
+			prize, err := engine.DrawFromPrizes(ctx, "test_tolerance_above", prizes)
+			require.NoError(t, err)
+			require.NotNil(t, prize)
+			assert.Contains(t, []string{"prize1", "prize2"}, prize.ID)
+		})
+
+		t.Run("Sum beyond tolerance - gets normalized", func(t *testing.T) {
+			prizes := []Prize{
+				{ID: "prize1", Name: "Prize 1", Probability: 0.5 + tolerance*2, Value: 100},
+				{ID: "prize2", Name: "Prize 2", Probability: 0.5 + tolerance*2, Value: 200},
+			}
+			// 总和 = 1.0 + 4*tolerance，超出容差范围，但会被自动归一化
+
+			prize, err := engine.DrawFromPrizes(ctx, "test_beyond_tolerance", prizes)
+			require.NoError(t, err) // 不应该出错，因为会自动归一化
+			require.NotNil(t, prize)
+			assert.Contains(t, []string{"prize1", "prize2"}, prize.ID)
+		})
+	})
+
+	t.Run("Edge case: Single prize with probability 0.0", func(t *testing.T) {
+		prizes := []Prize{
+			{ID: "zero", Name: "Zero Prize", Probability: 0.0, Value: 100},
+		}
+
+		_, err := engine.DrawFromPrizes(ctx, "test_single_zero", prizes)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidProbability, err)
+	})
+
+	t.Run("Extreme precision test", func(t *testing.T) {
+		// 测试极小概率差异的情况
+		prizes := []Prize{
+			{ID: "almost_certain", Name: "Almost Certain", Probability: 0.999999, Value: 100},
+			{ID: "almost_impossible", Name: "Almost Impossible", Probability: 0.000001, Value: 1000000},
+		}
+
+		// 进行大量抽奖来验证概率分布
+		results := make(map[string]int)
+		totalDraws := 100000
+
+		for i := range totalDraws {
+			lockKey := "test_extreme_precision_" + string(rune(i%1000)) + "_" + string(rune(i/1000))
+			prize, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
+			require.NoError(t, err)
+			require.NotNil(t, prize)
+			results[prize.ID]++
+		}
+
+		// 验证 almost_certain 占绝大多数
+		assert.Greater(t, results["almost_certain"], totalDraws*99/100) // 至少99%
+		// almost_impossible 应该很少但可能存在
+		assert.GreaterOrEqual(t, results["almost_impossible"], 0)
+		assert.Equal(t, totalDraws, results["almost_certain"]+results["almost_impossible"])
+	})
+
+	t.Run("Probability normalization test", func(t *testing.T) {
+		// 测试概率归一化功能
+		prizes := []Prize{
+			{ID: "half1", Name: "Half Prize 1", Probability: 0.25, Value: 100},
+			{ID: "half2", Name: "Half Prize 2", Probability: 0.25, Value: 200},
+		}
+		// 总和 = 0.5，应该被归一化为各自 0.5
+
+		results := make(map[string]int)
+		totalDraws := 1000
+
+		for i := range totalDraws {
+			lockKey := "test_normalization_" + string(rune(i%100)) + "_" + string(rune(i/100))
+			prize, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
+			require.NoError(t, err)
+			require.NotNil(t, prize)
+			results[prize.ID]++
+		}
+
+		// 由于归一化，两个奖品应该有大致相等的概率
+		ratio1 := float64(results["half1"]) / float64(totalDraws)
+		ratio2 := float64(results["half2"]) / float64(totalDraws)
+
+		// 允许一定的统计误差（±10%）
+		assert.InDelta(t, 0.5, ratio1, 0.1)
+		assert.InDelta(t, 0.5, ratio2, 0.1)
+		assert.Equal(t, totalDraws, results["half1"]+results["half2"])
+	})
+}
+
+// TestDrawFromPrizes_AdditionalBoundaryConditions 测试更多边界情况
+func TestDrawFromPrizes_AdditionalBoundaryConditions(t *testing.T) {
+	// Setup Redis client for testing
+	rdb := redis.NewClient(&redis.Options{
+		Addr: "localhost:6379",
+		DB:   1, // Use test database
+	})
+
+	// Clean up test keys
+	defer func() {
+		rdb.FlushDB(context.Background())
+		rdb.Close()
+	}()
+
+	// Test Redis connection
+	_, err := rdb.Ping(context.Background()).Result()
+	if err != nil {
+		t.Skip("Redis not available, skipping integration tests")
+	}
+
+	engine := NewLotteryEngineWithLogger(rdb, NewSilentLogger())
+	ctx := context.Background()
+
+	t.Run("Negative probability - should fail", func(t *testing.T) {
+		prizes := []Prize{
+			{ID: "negative", Name: "Negative Prize", Probability: -0.1, Value: 100},
+			{ID: "positive", Name: "Positive Prize", Probability: 1.1, Value: 200},
+		}
+
+		_, err := engine.DrawFromPrizes(ctx, "test_negative_prob", prizes)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidProbability, err)
+	})
+
+	t.Run("Probability greater than 1.0 - should fail", func(t *testing.T) {
+		prizes := []Prize{
+			{ID: "over", Name: "Over Prize", Probability: 1.5, Value: 100},
+		}
+
+		_, err := engine.DrawFromPrizes(ctx, "test_over_prob", prizes)
+		assert.Error(t, err)
+		assert.Equal(t, ErrInvalidProbability, err)
+	})
+
+	t.Run("Many prizes with equal tiny probabilities", func(t *testing.T) {
+		// 创建100个奖品，每个概率为0.01
+		prizes := make([]Prize, 100)
+		for i := range 100 {
+			prizes[i] = Prize{
+				ID:          "prize_" + string(rune(i)),
+				Name:        "Prize " + string(rune(i)),
+				Probability: 0.01,
+				Value:       100 + i,
+			}
+		}
+
+		// 进行多次抽奖验证分布
+		results := make(map[string]int)
+		totalDraws := 10000
+
+		for i := range totalDraws {
+			lockKey := "test_many_equal_" + string(rune(i%100)) + "_" + string(rune(i/100))
+			prize, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
+			require.NoError(t, err)
+			require.NotNil(t, prize)
+			results[prize.ID]++
+		}
+
+		// 验证每个奖品都有可能被抽到
+		uniquePrizes := len(results)
+		assert.Greater(t, uniquePrizes, 50) // 至少抽到一半以上的不同奖品
+
+		// 验证总抽奖次数
+		totalCount := 0
+		for _, count := range results {
+			totalCount += count
+		}
+		assert.Equal(t, totalDraws, totalCount)
+
+		// 验证分布的合理性（卡方检验）
+		expectedCount := float64(totalDraws) / float64(len(prizes))
+		for prizeID, count := range results {
+			// 每个奖品的抽中次数应该在合理范围内
+			deviation := math.Abs(float64(count) - expectedCount)
+			assert.Less(t, deviation, 3*math.Sqrt(expectedCount),
+				"Prize %s count %d deviates too much from expected %.2f",
+				prizeID, count, expectedCount)
+		}
+	})
+
+	t.Run("Floating point precision edge cases", func(t *testing.T) {
+		// 测试浮点数精度问题
+		prizes := []Prize{
+			{ID: "precise1", Name: "Precise 1", Probability: 0.333333333333333, Value: 100},
+			{ID: "precise2", Name: "Precise 2", Probability: 0.333333333333333, Value: 200},
+			{ID: "precise3", Name: "Precise 3", Probability: 0.333333333333334, Value: 300},
+		}
+		// 总和应该非常接近1.0
+
+		results := make(map[string]int)
+		totalDraws := 3000
+
+		for i := range totalDraws {
+			lockKey := "test_precision_" + string(rune(i%100)) + "_" + string(rune(i/100))
+			prize, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
+			require.NoError(t, err)
+			require.NotNil(t, prize)
+			results[prize.ID]++
+		}
+
+		// 验证分布大致均匀（每个约33.33%）
+		for prizeID, count := range results {
+			ratio := float64(count) / float64(totalDraws)
+			assert.InDelta(t, 0.333, ratio, 0.05, "Prize %s ratio should be around 0.333", prizeID)
+		}
+	})
+
+	t.Run("Single prize with probability close to 0", func(t *testing.T) {
+		// 测试接近0但不为0的概率
+		minFloat := 1e-10 // 非常小的正数
+		prizes := []Prize{
+			{ID: "tiny", Name: "Tiny Prize", Probability: minFloat, Value: 100},
+		}
+
+		// 由于概率会被归一化为1.0，应该总是能抽到
+		prize, err := engine.DrawFromPrizes(ctx, "test_tiny_single", prizes)
+		require.NoError(t, err)
+		require.NotNil(t, prize)
+		assert.Equal(t, "tiny", prize.ID)
+	})
+
+	t.Run("Probability sum exactly 1.0", func(t *testing.T) {
+		// 测试概率总和恰好为1.0的情况
+		prizes := []Prize{
+			{ID: "exact1", Name: "Exact 1", Probability: 0.4, Value: 100},
+			{ID: "exact2", Name: "Exact 2", Probability: 0.6, Value: 200},
+		}
+
+		results := make(map[string]int)
+		totalDraws := 1000
+
+		for i := range totalDraws {
+			lockKey := "test_exact_sum_" + string(rune(i%100)) + "_" + string(rune(i/100))
+			prize, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
+			require.NoError(t, err)
+			require.NotNil(t, prize)
+			results[prize.ID]++
+		}
+
+		// 验证分布符合预期
+		ratio1 := float64(results["exact1"]) / float64(totalDraws)
+		ratio2 := float64(results["exact2"]) / float64(totalDraws)
+
+		assert.InDelta(t, 0.4, ratio1, 0.05)
+		assert.InDelta(t, 0.6, ratio2, 0.05)
+		assert.Equal(t, totalDraws, results["exact1"]+results["exact2"])
+	})
+
+	t.Run("Large number of prizes with mixed probabilities", func(t *testing.T) {
+		// 创建大量奖品，概率分布不均
+		prizes := make([]Prize, 0, 1000)
+
+		// 添加一个高概率奖品
+		prizes = append(prizes, Prize{
+			ID: "common", Name: "Common Prize", Probability: 0.5, Value: 10,
+		})
+
+		// 添加999个低概率奖品
+		lowProb := 0.5 / 999.0 // 剩余概率平均分配
+		for i := range 999 {
+			prizes = append(prizes, Prize{
+				ID:          "rare_" + string(rune(i)),
+				Name:        "Rare Prize " + string(rune(i)),
+				Probability: lowProb,
+				Value:       1000 + i,
+			})
+		}
+
+		// 进行抽奖测试
+		results := make(map[string]int)
+		totalDraws := 2000
+
+		for i := range totalDraws {
+			lockKey := "test_large_pool_" + string(rune(i%1000)) + "_" + string(rune(i/1000))
+			prize, err := engine.DrawFromPrizes(ctx, lockKey, prizes)
+			require.NoError(t, err)
+			require.NotNil(t, prize)
+			results[prize.ID]++
+		}
+
+		// 验证common奖品占大多数
+		commonCount := results["common"]
+		commonRatio := float64(commonCount) / float64(totalDraws)
+		assert.InDelta(t, 0.5, commonRatio, 0.05)
+
+		// 验证至少抽到了一些稀有奖品
+		rareCount := 0
+		for prizeID := range results {
+			if prizeID != "common" {
+				rareCount++
+			}
+		}
+		assert.Greater(t, rareCount, 10) // 至少抽到10种不同的稀有奖品
+	})
 }
