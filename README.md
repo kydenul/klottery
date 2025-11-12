@@ -726,15 +726,9 @@ type AutoScaler struct {
 
 感谢以下开源项目的支持：
 
-- [Redis](https://redis.io/) - 高性能内存数据库
-- [go-redis](https://github.com/go-redis/redis) - Go Redis 客户端
-- [testify](https://github.com/stretchr/testify) - Go 测试框架
-
-## 📞 联系我们
-
-- **项目主页**: <https://github.com/kydenul/klottery>
-- **问题反馈**: <https://github.com/kydenul/klottery/issues>
-- **邮箱**: <kydenul@example.com>
+- [Redis](https://redis.io/) 高性能内存数据库
+- [go-redis](https://github.com/go-redis/redis) Go Redis 客户端
+- [testify](https://github.com/stretchr/testify) Go 测试框架
 
 ---
 
